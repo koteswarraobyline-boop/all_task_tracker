@@ -1,0 +1,14 @@
+Task ID,Component Module,Feature,Title,Description,Developer Owner,Task Status,Start Date,Target Due Date,Estimated,Spent Time,Notes,Phase,Week,Est. Days,Dependencies
+1.13,Auth,Access Management,Access Management,System login and role access management,,In Development,,,,,,Phase 1,W1,,
+1.13-1,Auth,Access Management,↳ Access management from school admin to teacher,Admin dashboard to manage access toggles,John Doe,Completed,2026-04-20,2026-04-25,12,12,,Phase 1,W1,5,
+1.13-2,Auth,Access Management,↳ Global Access management from Admin Dashboard,Allows global admins to provision access roles,John Doe,Completed,2026-04-22,2026-04-26,8,8,,Phase 1,W1,3,1.13-1
+1.13-3,Auth,Access Management,↳ Validity time period,Configure role activation expirations,Jane Smith,In Development,2026-04-25,,16,10,,Phase 1,W1,6,1.13-2
+1.13-4,Auth,Access Management,↳ Access Management for Textbooks and Library,Manage granular reading access permissions,Jane Smith,Upcoming,,,12,,,Phase 1,W1,5,
+1.13-5,Auth,Access Management,↳ Access management for Demo kits and credentials,Manage public demo login shares,Alex Jones,Upcoming,,,8,,,Phase 1,W1,3,
+1.14,Auth,AI Assessment Creator,AI Assessment Creator,Generates automatic assessment worksheets,,Completed,,,,,,Phase 1,W4,,
+1.14-1,Auth,AI Assessment Creator,↳ Form worksheet templates,Select templates based on subject criteria,Alex Jones,Completed,2026-05-10,2026-05-14,20,18,,Phase 1,W4,8,
+1.14-2,Auth,AI Assessment Creator,↳ Question banks integration,Pulls random questions from database,Bob Builder,Completed,2026-05-12,2026-05-15,10,9,,Phase 1,W4,4,1.14-1
+T-1009,Settings,Dark Theme,Implement MUI Light and Dark toggles,Create custom palette configuration and persistent state,Charlie Brown,Blocked,2026-07-18,2026-07-25,16,4,Blocked on design color guidelines,Infrastructure,W6,6,
+T-1010,Settings,Localization,Add Multilingual i18n support,Support Spanish and French translations on board views,Charlie Brown,On Hold,2026-07-20,2026-07-30,24,0,Delayed to Phase 2,Infrastructure,W6,10,T-1009
+T-1011,Auth,Logout,Add Session Clear and Token Invalidation,Clear cookies and client tokens on logout,John Doe,Upcoming,2026-07-22,2026-07-24,4,,To be picked up next,Phase 2,W2,2,
+T-1012,Dashboard,Line Chart,Render Project Burnup Progress Chart,Line chart displaying total vs completed tasks over time,,Upcoming,,,8,,Unassigned task,Phase 2,W2,4,

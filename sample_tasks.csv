@@ -1,0 +1,13 @@
+Task ID,Component Module,Feature,Title,Description,Developer Owner,Task Status,Start Date,Target Due Date,Estimated,Spent Time,Notes
+T-1001,Auth,OAuth login,Implement Google Login OAuth2 integration,Users should be able to log in with Google accounts,John Doe,Completed,2026-07-01,2026-07-05,12,14.5,Fully integrated and tested on staging
+T-1002,Auth,JWT Refresh,Implement Access and Refresh JWT Tokens,Handle token expiration and automatic silent token refresh on client,John Doe,Completed,2026-07-06,2026-07-08,8,8,Implemented in redis cache
+T-1003,Dashboard,Stats Cards,Build Project Analytics Cards,Render stats summary count cards for tasks,Jane Smith,In Development,2026-07-10,2026-07-15,16,10,Awaiting design reviews
+T-1004,Dashboard,Bar Chart,Build Developer Workload Stacked Bar Chart,Show tasks split in stacked format for active developers,Jane Smith,Testing,2026-07-12,2026-07-18,12,11.5,Ready for developer testing
+T-1005,Import,CSV Parsing,Add Multer Upload and Stream Parsing,Handle big spreadsheets using stream csv-parser in backend,Alex Jones,In Development,2026-07-14,2026-07-20,20,18,Writing unit tests
+T-1006,Import,Validation,Implement CSV Column Validation,Check for missing task name and duplicate task ids,Alex Jones,Code Review,2026-07-15,2026-07-21,12,8,Validation checks completed
+T-1007,Database,Sequelize,Define Models and Database Schema,Create mysql tables and configure model relationships,Bob Builder,Completed,2026-07-01,2026-07-04,10,9,Created migrations successfully
+T-1008,Database,Associations,Configure Cascade Delete and Foreign Keys,Delete project should wipe out tasks but keep developers,Bob Builder,Completed,2026-07-04,2026-07-05,6,5.5,Tested cascading delete
+T-1009,Settings,Dark Theme,Implement MUI Light and Dark toggles,Create custom palette configuration and persistent state,Charlie Brown,Blocked,2026-07-18,2026-07-25,16,4,Blocked on design color guidelines
+T-1010,Settings,Localization,Add Multilingual i18n support,Support Spanish and French translations on board views,Charlie Brown,On Hold,2026-07-20,2026-07-30,24,0,Delayed to Phase 2
+T-1011,Auth,Logout,Add Session Clear and Token Invalidation,Clear cookies and client tokens on logout,John Doe,Upcoming,2026-07-22,2026-07-24,4,,To be picked up next
+T-1012,Dashboard,Line Chart,Render Project Burnup Progress Chart,Line chart displaying total vs completed tasks over time,,Upcoming,,,8,,Unassigned task
