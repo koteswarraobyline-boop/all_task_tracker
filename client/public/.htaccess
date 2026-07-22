@@ -1,0 +1,16 @@
+# Deployed with client/dist (document root).
+# Proxies /api to the Node process. PORT must match server/.env (default 5004).
+#
+# Requires: mod_rewrite + mod_proxy (+ mod_proxy_http) on Apache/LiteSpeed
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Proxy API requests to Node
+  RewriteRule ^api/(.*)$ http://127.0.0.1:5004/api/$1 [P,L]
+
+  # SPA: non-file routes → index.html (React Router /client/:token, etc.)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [L]
+</IfModule>
