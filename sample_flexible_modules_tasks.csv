@@ -1,0 +1,9 @@
+Record Type,ID,Parent ID,Name,Description,Status,Priority,Assignee,Start Date,Due Date,Estimated Hours,Actual Hours,Progress %,Tags,Dependencies,Phase
+Module,M001,,Authentication,Login and security foundation,Active,High,John Doe,2026-07-01,2026-08-01,,,,,auth;security,,Phase 1
+Task,T001,M001,Login API,Build login endpoint,In Progress,High,Alice Smith,2026-07-02,2026-07-10,12,6,50,api;auth,,Phase 1
+Task,T002,M001,JWT Authentication,Implement JWT access and refresh tokens,Todo,Medium,Bob Builder,2026-07-05,2026-07-15,8,,0,api;security,T001,Phase 1
+Module,M002,,Dashboard,User dashboard and analytics,Active,High,Mike Ross,2026-07-03,2026-08-10,,,,,ui,,Phase 1
+Task,T003,M002,Dashboard UI,Create main dashboard page,Todo,High,Emma Stone,2026-07-04,2026-07-20,16,,0,ui;frontend,,Phase 1
+Module,M003,M002,Reports,Reporting submodule under Dashboard,Planned,Medium,Sarah Connor,2026-07-10,2026-08-15,,,,,reports,,Phase 1
+Task,T004,M003,Sales Report,Build sales report page,Todo,Medium,David Lee,2026-07-12,2026-07-25,10,,0,reports;charts,,Phase 1
+Task,T005,,Server Backup,Backup automation (standalone - no module),Todo,Low,Admin,2026-07-01,2026-07-31,4,,0,ops;infra,,Infrastructure

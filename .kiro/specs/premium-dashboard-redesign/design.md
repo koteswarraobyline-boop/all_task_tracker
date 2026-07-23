@@ -2,7 +2,7 @@
 
 ## Overview
 
-The goal is to elevate the DevTask Tracker frontend from a functional CRUD dashboard to a premium, award-winning SaaS UI indistinguishable from Linear, Vercel, or Stripe. The entire visual layer is replaced while all existing data, API calls, routing, and business logic are preserved. The stack remains React 19 + MUI 9 + Framer Motion 12 + Recharts 3 + Vite. No new npm dependencies are added.
+The goal is to elevate the Task Tracker frontend from a functional CRUD dashboard to a premium, award-winning SaaS UI indistinguishable from Linear, Vercel, or Stripe. The entire visual layer is replaced while all existing data, API calls, routing, and business logic are preserved. The stack remains React 19 + MUI 9 + Framer Motion 12 + Recharts 3 + Vite. No new npm dependencies are added.
 
 The redesign is additive and surgical: `theme.js` is enriched with a full Design Token system; `index.css` adds font loading, shimmer keyframes, and scrollbar polish; shared components are upgraded in place; and pages are refactored one-by-one to consume the new tokens.
 

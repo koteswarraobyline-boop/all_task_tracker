@@ -2,7 +2,7 @@
 
 ## Overview
 
-Incremental upgrade of the DevTask Tracker frontend from a functional dashboard to a premium SaaS UI. Each task targets a specific file or component, builds on the previous step, and ends with everything wired together. No new runtime npm packages are added; fast-check is the only new devDependency.
+Incremental upgrade of the Task Tracker frontend from a functional dashboard to a premium SaaS UI. Each task targets a specific file or component, builds on the previous step, and ends with everything wired together. No new runtime npm packages are added; fast-check is the only new devDependency.
 
 ## Tasks
 

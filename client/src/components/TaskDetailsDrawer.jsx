@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Drawer,
   Box,
@@ -6,119 +6,242 @@ import {
   IconButton,
   TextField,
   MenuItem,
-  Grid,
   Chip,
-  Divider,
-  Paper,
   CircularProgress,
   Avatar,
   Stack,
   LinearProgress,
-  Stepper,
-  Step,
-  StepLabel,
+  Button,
+  Alert,
 } from '@mui/material';
 import {
   Close as CloseIcon,
-  CheckCircle as SuccessIcon,
-  HourglassEmpty as PendingIcon,
-  Timeline as TimelineIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
-
-const STATUS_STEPS = [
-  'Upcoming',
-  'Assigned',
-  'In Development',
-  'Code Review',
-  'Testing',
-  'Completed'
-];
+import { usePermission } from '../hooks/usePermission';
+import { useRole } from '../context/RoleContext';
+import { getDeveloperDisplayName } from '../utils/developerDisplay';
+import { getTaskProgressPercent, progressBarColor } from '../utils/taskProgress';
 
 const ALL_STATUSES = [
   'Upcoming', 'Assigned', 'In Development', 'Code Review',
-  'Testing', 'Completed', 'Blocked', 'On Hold'
+  'Testing', 'Completed', 'Blocked', 'On Hold',
 ];
 
-export default function TaskDetailsDrawer({ open, onClose, task, developers, onTaskUpdated }) {
-  const [status, setStatus] = useState('');
-  const [developerId, setDeveloperId] = useState('');
-  const [actualHours, setActualHours] = useState('');
-  const [remarks, setRemarks] = useState('');
-  
-  // New screenshot fields
-  const [phase, setPhase] = useState('');
-  const [week, setWeek] = useState('');
-  const [estDays, setEstDays] = useState('');
-  const [dependencies, setDependencies] = useState('');
+const PRIORITIES = ['P0', 'P1', 'P2', 'P3', 'High', 'Medium', 'Low'];
 
+const fieldSx = {
+  '& .MuiOutlinedInput-root': { borderRadius: 2 },
+};
+
+/** Split "Title – long description…" when description was stored in the name. */
+export function splitTitleAndDescription(taskName = '', description = '') {
+  const name = String(taskName || '').trim();
+  const desc = String(description || '').trim();
+  if (desc || !name) {
+    return { title: name, description: desc };
+  }
+
+  const separators = [' – ', ' — ', ' - '];
+  for (const sep of separators) {
+    const idx = name.indexOf(sep);
+    if (idx > 0) {
+      const title = name.slice(0, idx).trim();
+      const rest = name.slice(idx + sep.length).trim();
+      // Only split when the second part looks like a real description
+      if (title.length >= 3 && rest.length >= 20) {
+        return { title, description: rest };
+      }
+    }
+  }
+
+  return { title: name, description: '' };
+}
+
+function toDateInput(value) {
+  if (!value) return '';
+  return String(value).slice(0, 10);
+}
+
+function formatDate(value) {
+  if (!value) return null;
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch {
+    return value;
+  }
+}
+
+function buildFormFromTask(task) {
+  const { title, description } = splitTitleAndDescription(task.taskName, task.description);
+  return {
+    taskName: title || task.taskName || '',
+    description: description || '',
+    status: task.status || '',
+    developerId: task.developerId || '',
+    priority: task.priority || '',
+    module: task.module || '',
+    feature: task.feature || '',
+    phase: task.phase || '',
+    week: task.week || '',
+    startDate: toDateInput(task.startDate),
+    dueDate: toDateInput(task.dueDate),
+    estimatedHours:
+      task.estimatedHours !== null && task.estimatedHours !== undefined ? String(task.estimatedHours) : '',
+    actualHours:
+      task.actualHours !== null && task.actualHours !== undefined ? String(task.actualHours) : '',
+    estDays: task.estDays !== null && task.estDays !== undefined ? String(task.estDays) : '',
+    dependencies: task.dependencies || '',
+    remarks: task.remarks || '',
+  };
+}
+
+function DetailRow({ label, children }) {
+  if (children === null || children === undefined || children === '') return null;
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: { xs: 'column', sm: 'row' },
+        justifyContent: 'space-between',
+        alignItems: { xs: 'flex-start', sm: 'flex-start' },
+        gap: { xs: 0.5, sm: 2 },
+        py: 1.1,
+        borderBottom: '1px solid',
+        borderColor: 'divider',
+        '&:last-of-type': { borderBottom: 'none' },
+      }}
+    >
+      <Typography
+        variant="body2"
+        sx={{
+          color: "text.secondary",
+          fontWeight: 600,
+          flexShrink: 0,
+          pt: { sm: 0.15 }
+        }}>
+        {label}
+      </Typography>
+      <Box sx={{ textAlign: { xs: 'left', sm: 'right' }, minWidth: 0, width: { xs: '100%', sm: 'auto' } }}>{children}</Box>
+    </Box>
+  );
+}
+
+export default function TaskDetailsDrawer({ open, onClose, task, developers, onTaskUpdated, startInEditMode = false }) {
+  const { role } = useRole();
+  const isClient = role === 'client';
+  const canEditPerm = usePermission('task.edit');
+  const canStatusPerm = usePermission('task.status');
+  const canAssignPerm = usePermission('task.assign');
+  const canEdit = !isClient && canEditPerm;
+  const canStatus = !isClient && canStatusPerm;
+  const canAssign = !isClient && canAssignPerm;
+  const canModify = !isClient && (canEdit || canStatus || canAssign);
+
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', 'error'
-  
-  const prevTaskIdRef = useRef(null);
+  const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
     if (task) {
-      setStatus(task.status || '');
-      setDeveloperId(task.developerId || '');
-      setActualHours(task.actualHours !== null && task.actualHours !== undefined ? task.actualHours : '');
-      setRemarks(task.remarks || '');
-      
-      // Sync new states
-      setPhase(task.phase || '');
-      setWeek(task.week || '');
-      setEstDays(task.estDays !== null && task.estDays !== undefined ? task.estDays : '');
-      setDependencies(task.dependencies || '');
-
-      setSaveStatus('saved');
-      prevTaskIdRef.current = task.id;
+      setForm(buildFormFromTask(task));
+      setEditing(Boolean(startInEditMode && canModify));
+      setError('');
+      setSuccessMsg('');
+    } else {
+      setForm(null);
+      setEditing(false);
     }
+  }, [task, open, startInEditMode, canModify]);
+
+  const display = useMemo(() => {
+    if (!task) return { title: '', description: '' };
+    return splitTitleAndDescription(task.taskName, task.description);
   }, [task]);
 
-  if (!task) return null;
+  if (!task || !form) return null;
 
-  const handleSaveField = async (fieldName, val) => {
-    if (task.id !== prevTaskIdRef.current) return;
-    
-    const dbVal = task[fieldName];
-    const normalizedDbVal = dbVal === null || dbVal === undefined ? '' : dbVal;
-    const normalizedVal = val === null || val === undefined ? '' : val;
-    if (String(normalizedDbVal) === String(normalizedVal)) return;
+  const setField = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    setSuccessMsg('');
+    setError('');
+  };
+
+  const handleCancelEdit = () => {
+    setForm(buildFormFromTask(task));
+    setEditing(false);
+    setError('');
+    setSuccessMsg('');
+  };
+
+  const handleSaveChanges = async () => {
+    if (!canModify) return;
+    if (!form.taskName.trim()) {
+      setError('Task name is required');
+      return;
+    }
+    if (
+      (form.status === 'Blocked' || form.status === 'On Hold') &&
+      !form.remarks.trim()
+    ) {
+      setError(
+        form.status === 'On Hold'
+          ? 'Add a hold reason in Notes — it appears on the overview timeline.'
+          : 'Add a block reason in Notes — it appears on the overview timeline.'
+      );
+      return;
+    }
 
     setSaving(true);
-    setSaveStatus('saving');
-    
+    setError('');
+    setSuccessMsg('');
     try {
       const payload = {
-        status,
-        developerId: developerId ? parseInt(developerId) : null,
-        actualHours: actualHours === '' ? null : parseFloat(actualHours),
-        remarks,
-        phase,
-        week,
-        estDays: estDays === '' ? null : parseFloat(estDays),
-        dependencies,
-        [fieldName]: val
+        taskName: form.taskName.trim(),
+        description: form.description.trim() || null,
+        status: form.status || null,
+        developerId: form.developerId ? parseInt(form.developerId, 10) : null,
+        priority: form.priority || null,
+        module: form.module.trim() || null,
+        feature: form.feature.trim() || null,
+        phase: form.phase.trim() || null,
+        week: form.week.trim() || null,
+        startDate: form.startDate || null,
+        dueDate: form.dueDate || null,
+        estimatedHours: form.estimatedHours === '' ? null : parseFloat(form.estimatedHours),
+        actualHours: form.actualHours === '' ? null : parseFloat(form.actualHours),
+        estDays: form.estDays === '' ? null : parseFloat(form.estDays),
+        dependencies: form.dependencies.trim() || null,
+        remarks: form.remarks.trim() || null,
       };
 
       const updated = await api.updateTask(task.id, payload);
-      setSaveStatus('saved');
       onTaskUpdated(updated);
-    } catch (error) {
-      console.error('Failed to save field:', error);
-      setSaveStatus('error');
+      setForm(buildFormFromTask(updated));
+      setEditing(false);
+      setSuccessMsg('Changes saved');
+    } catch (err) {
+      console.error('Failed to save task:', err);
+      setError(err.response?.data?.error || 'Failed to save changes');
     } finally {
       setSaving(false);
     }
   };
 
   const getPriorityColor = (prio) => {
-    switch (prio?.toLowerCase()) {
-      case 'high': return 'error';
-      case 'medium': return 'warning';
-      case 'low': return 'info';
-      default: return 'default';
-    }
+    const p = String(prio || '').toLowerCase();
+    if (p === 'p0' || p === 'high') return 'error';
+    if (p === 'p1' || p === 'medium') return 'warning';
+    if (p === 'p2' || p === 'low') return 'info';
+    return 'default';
   };
 
   const getStatusColor = (stat) => {
@@ -135,281 +258,606 @@ export default function TaskDetailsDrawer({ open, onClose, task, developers, onT
 
   const getDevInitials = (name) => {
     if (!name) return '';
-    return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+    return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
   };
 
-  // Determine current active index in linear workflow timeline
-  const currentStepIndex = STATUS_STEPS.indexOf(status);
+  const est = parseFloat(form.estimatedHours || task.estimatedHours || 0) || 0;
+  const act = parseFloat(form.actualHours || 0) || 0;
+  // Bar follows status; while editing, ignore stored Progress % so the bar updates with the dropdown
+  const progressPct = getTaskProgressPercent({
+    status: form.status,
+    progressPercent: editing ? null : task.progressPercent,
+  });
 
-  // Calculate work progress percentage for indicator
-  const est = parseFloat(task.estimatedHours || 0);
-  const act = parseFloat(actualHours || 0);
-  let progressPct = 0;
-  if (est > 0) {
-    progressPct = Math.min(Math.round((act / est) * 100), 100);
-  } else if (status === 'Completed') {
-    progressPct = 100;
-  }
+  const assignedDev = developers.find(
+    (d) => d.id === form.developerId || d.id === parseInt(form.developerId, 10)
+  );
+  const developerLabel = getDeveloperDisplayName(assignedDev);
+
+  const grid2 = {
+    display: 'grid',
+    gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+    gap: 2,
+  };
+
+  const viewTitle = editing ? form.taskName : display.title;
+  const viewDescription = editing ? form.description : display.description;
 
   return (
     <Drawer
       anchor="right"
       open={open}
-      onClose={onClose}
+      onClose={() => {
+        if (editing) handleCancelEdit();
+        onClose();
+      }}
       PaperProps={{
-        sx: { width: { xs: '100%', sm: 500 }, p: 0 }
+        sx: {
+          width: { xs: '100%', sm: 440, md: 480 },
+          maxWidth: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          borderRadius: 0,
+        },
       }}
     >
       {/* Header */}
-      <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'background.default', borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>
-            {task.taskId}
-          </Typography>
-          <Typography variant="h6" sx={{ fontWeight: 800, mt: 0.5 }}>
-            Task Controls
+      <Box
+        sx={{
+          px: { xs: 2, sm: 3 },
+          py: 2,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 1.5,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+          bgcolor: (t) => (t.palette.mode === 'dark' ? 'grey.900' : 'grey.50'),
+          flexShrink: 0,
+        }}
+      >
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Stack
+            direction="row"
+            sx={{
+              alignItems: "center",
+              gap: 1,
+              flexWrap: "wrap",
+              mb: 0.75
+            }}>
+            <Chip
+              label={task.taskId || 'Task'}
+              size="small"
+              sx={{ height: 22, fontWeight: 700, fontSize: '0.7rem', borderRadius: 2 }}
+            />
+            <Chip
+              label={form.status || 'Upcoming'}
+              color={getStatusColor(form.status)}
+              size="small"
+              sx={{ height: 22, fontWeight: 700, fontSize: '0.7rem', borderRadius: 2 }}
+            />
+          </Stack>
+          <Typography
+            variant="subtitle1"
+            sx={{
+              fontWeight: 800,
+              lineHeight: 1.3,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              wordBreak: 'break-word',
+            }}
+          >
+            {editing ? 'Edit task' : (viewTitle || 'Task')}
           </Typography>
         </Box>
-        
-        <Stack direction="row" alignItems="center" gap={1.5}>
-          {saveStatus === 'saving' && (
-            <Stack direction="row" alignItems="center" gap={0.5} sx={{ color: 'text.secondary', fontSize: '0.78rem' }}>
-              <CircularProgress size={12} color="inherit" />
-              <Typography variant="caption">Saving...</Typography>
-            </Stack>
+
+        <Stack
+          direction="row"
+          sx={{
+            alignItems: "center",
+            gap: 0.75,
+            flexShrink: 0
+          }}>
+          {canModify && !editing && (
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<EditIcon />}
+              onClick={() => setEditing(true)}
+              sx={{ fontWeight: 700, borderRadius: 2, textTransform: 'none' }}
+            >
+              Edit
+            </Button>
           )}
-          {saveStatus === 'saved' && (
-            <Stack direction="row" alignItems="center" gap={0.5} sx={{ color: 'success.main', fontSize: '0.78rem' }}>
-              <SuccessIcon sx={{ fontSize: 14 }} />
-              <Typography variant="caption" sx={{ fontWeight: 650 }}>Saved</Typography>
-            </Stack>
-          )}
-          <IconButton onClick={onClose} size="small">
+          <IconButton
+            onClick={() => {
+              if (editing) handleCancelEdit();
+              onClose();
+            }}
+            size="small"
+            aria-label="Close"
+          >
             <CloseIcon />
           </IconButton>
         </Stack>
       </Box>
-
-      {/* Body Content */}
-      <Box sx={{ p: 3.5, overflowY: 'auto', flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        
-        {/* Title & Description */}
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 750, mb: 1.5, color: 'text.primary', lineHeight: 1.35 }}>
-            {task.taskName}
-          </Typography>
-          {task.description ? (
-            <Paper variant="outlined" sx={{ p: 2, bgcolor: (theme) => theme.palette.mode === 'dark' ? '#1f293730' : '#f8fafc', borderColor: 'divider' }}>
-              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                {task.description}
-              </Typography>
-            </Paper>
-          ) : (
-            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-              No description text available.
-            </Typography>
-          )}
-        </Box>
-
-        {/* Read-Only Parameters Grid */}
-        <Grid container spacing={2}>
-          <Grid item xs={6}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Module</Typography>
-            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 650 }}>
-              {task.module ? <Chip label={task.module} size="small" sx={{ height: 22, fontSize: '0.75rem' }} /> : 'General'}
-            </Typography>
-          </Grid>
-          <Grid item xs={6}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Feature</Typography>
-            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 650 }}>
-              {task.feature ? <Chip label={task.feature} size="small" sx={{ height: 22, fontSize: '0.75rem' }} /> : 'Base'}
-            </Typography>
-          </Grid>
-          <Grid item xs={6}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Priority</Typography>
-            <Box sx={{ mt: 0.5 }}>
-              {task.priority ? (
-                <Chip label={task.priority} color={getPriorityColor(task.priority)} size="small" sx={{ fontWeight: 700, height: 20, fontSize: '0.7rem' }} />
-              ) : (
-                <Typography variant="body2" color="text.secondary">Not specified</Typography>
-              )}
-            </Box>
-          </Grid>
-          <Grid item xs={6}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Due Date</Typography>
-            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>
-              {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No deadline'}
-            </Typography>
-          </Grid>
-        </Grid>
-
-        <Divider />
-
-        {/* Status Workflow Timeline Stepper */}
-        {currentStepIndex !== -1 && (
-          <Box>
-            <Stack direction="row" alignItems="center" gap={1} sx={{ mb: 2 }}>
-              <TimelineIcon color="primary" sx={{ fontSize: 18 }} />
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.secondary' }}>
-                Workflow Progress
-              </Typography>
-            </Stack>
-            
-            <Stepper activeStep={currentStepIndex} alternativeLabel sx={{ '& .MuiStepLabel-label': { fontSize: '0.68rem', fontWeight: 600 } }}>
-              {STATUS_STEPS.map((label) => (
-                <Step key={label}>
-                  <StepLabel>{label}</StepLabel>
-                </Step>
-              ))}
-            </Stepper>
-          </Box>
+      <Box
+        sx={{
+          px: { xs: 2, sm: 3 },
+          py: 2.5,
+          overflowY: 'auto',
+          flexGrow: 1,
+        }}
+      >
+        {error && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
+        {successMsg && !editing && (
+          <Alert severity="success" sx={{ mb: 2, borderRadius: 2 }}>{successMsg}</Alert>
         )}
 
-        <Divider />
+        {editing ? (
+          <Stack spacing={2.5}>
+            <TextField
+              label="Title"
+              value={form.taskName}
+              onChange={(e) => setField('taskName', e.target.value)}
+              fullWidth
+              required
+              disabled={!canEdit}
+              sx={fieldSx}
+            />
+            {canEdit && (
+              <TextField
+                label="Description"
+                value={form.description}
+                onChange={(e) => setField('description', e.target.value)}
+                fullWidth
+                multiline
+                minRows={4}
+                placeholder="What needs to be done…"
+                sx={fieldSx}
+              />
+            )}
 
-        {/* Hours Progress Tracker */}
-        <Box>
-          <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 650 }}>
-              Hours Budget (Logged: {act}h / Est: {est}h)
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              {progressPct}%
-            </Typography>
+            <Box sx={grid2}>
+              {canStatus ? (
+                <TextField
+                  select
+                  label="Status"
+                  value={form.status}
+                  onChange={(e) => setField('status', e.target.value)}
+                  fullWidth
+                  sx={fieldSx}
+                >
+                  {ALL_STATUSES.map((opt) => (
+                    <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+                  ))}
+                </TextField>
+              ) : null}
+
+              {canAssign ? (
+                <TextField
+                  select
+                  label="Developer"
+                  value={form.developerId}
+                  onChange={(e) => setField('developerId', e.target.value)}
+                  fullWidth
+                  sx={fieldSx}
+                >
+                  <MenuItem value="">Unassigned</MenuItem>
+                  {developers.map((dev) => {
+                    const label = getDeveloperDisplayName(dev);
+                    return (
+                      <MenuItem key={dev.id} value={dev.id}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', columnGap: 1, minWidth: 0 }}>
+                          <Avatar
+                            sx={{
+                              width: 22,
+                              height: 22,
+                              flex: '0 0 22px',
+                              fontSize: '0.65rem',
+                              bgcolor: dev.color,
+                            }}
+                          >
+                            {getDevInitials(label)}
+                          </Avatar>
+                          <Typography variant="body2" noWrap sx={{ minWidth: 0 }}>
+                            {label}
+                          </Typography>
+                        </Box>
+                      </MenuItem>
+                    );
+                  })}
+                </TextField>
+              ) : null}
+            </Box>
+
+            {canEdit && (
+              <>
+                <Typography
+                  variant="overline"
+                  sx={{
+                    color: "text.secondary",
+                    fontWeight: 800,
+                    letterSpacing: 0.8
+                  }}>
+                  Details
+                </Typography>
+                <Box sx={grid2}>
+                  <TextField
+                    select
+                    label="Priority"
+                    value={form.priority}
+                    onChange={(e) => setField('priority', e.target.value)}
+                    fullWidth
+                    sx={fieldSx}
+                  >
+                    <MenuItem value="">None</MenuItem>
+                    {PRIORITIES.map((p) => (
+                      <MenuItem key={p} value={p}>{p}</MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    label="Module"
+                    value={form.module}
+                    onChange={(e) => setField('module', e.target.value)}
+                    fullWidth
+                    sx={fieldSx}
+                  />
+                  <TextField
+                    label="Feature"
+                    value={form.feature}
+                    onChange={(e) => setField('feature', e.target.value)}
+                    fullWidth
+                    sx={fieldSx}
+                  />
+                  <TextField
+                    label="Phase"
+                    value={form.phase}
+                    onChange={(e) => setField('phase', e.target.value)}
+                    fullWidth
+                    sx={fieldSx}
+                  />
+                  <TextField
+                    label="Est. days"
+                    type="number"
+                    value={form.estDays}
+                    onChange={(e) => setField('estDays', e.target.value)}
+                    fullWidth
+                    sx={fieldSx}
+                    slotProps={{
+                      htmlInput: { min: 0, step: 0.5 }
+                    }}
+                  />
+                  <TextField
+                    label="Start date"
+                    type="date"
+                    value={form.startDate}
+                    onChange={(e) => setField('startDate', e.target.value)}
+                    fullWidth
+                    slotProps={{ inputLabel: {
+                      ...{ shrink: true },
+                      ...{ shrink: true }
+                    }, htmlInput: { placeholder: '' } }}
+                    sx={fieldSx} />
+                  <TextField
+                    label="Due date"
+                    type="date"
+                    value={form.dueDate}
+                    onChange={(e) => setField('dueDate', e.target.value)}
+                    fullWidth
+                    slotProps={{ inputLabel: {
+                      ...{ shrink: true },
+                      ...{ shrink: true }
+                    }, htmlInput: { placeholder: '' } }}
+                    sx={fieldSx} />
+                  <TextField
+                    label="Estimated hours"
+                    type="number"
+                    value={form.estimatedHours}
+                    onChange={(e) => setField('estimatedHours', e.target.value)}
+                    fullWidth
+                    sx={fieldSx}
+                    slotProps={{
+                      htmlInput: { min: 0, step: 0.5 }
+                    }}
+                  />
+                  <TextField
+                    label="Spent hours"
+                    type="number"
+                    value={form.actualHours}
+                    onChange={(e) => setField('actualHours', e.target.value)}
+                    fullWidth
+                    sx={fieldSx}
+                    slotProps={{
+                      htmlInput: { min: 0, step: 0.5 }
+                    }}
+                  />
+                </Box>
+                <TextField
+                  label="Dependencies"
+                  value={form.dependencies}
+                  onChange={(e) => setField('dependencies', e.target.value)}
+                  fullWidth
+                  placeholder="e.g. T-1002"
+                  sx={fieldSx}
+                />
+                <TextField
+                  label={
+                    form.status === 'Blocked'
+                      ? 'Block reason (Notes)'
+                      : form.status === 'On Hold'
+                        ? 'Hold reason (Notes)'
+                        : 'Notes'
+                  }
+                  value={form.remarks}
+                  onChange={(e) => setField('remarks', e.target.value)}
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  required={form.status === 'Blocked' || form.status === 'On Hold'}
+                  helperText={
+                    form.status === 'Blocked' || form.status === 'On Hold'
+                      ? 'Shown on the overview timeline only'
+                      : undefined
+                  }
+                  placeholder={
+                    form.status === 'Blocked'
+                      ? 'Why is this task blocked?'
+                      : form.status === 'On Hold'
+                        ? 'Why is this task on hold?'
+                        : undefined
+                  }
+                  sx={fieldSx}
+                />
+              </>
+            )}
           </Stack>
-          <LinearProgress
-            variant="determinate"
-            value={progressPct}
-            color={act > est && est > 0 ? 'error' : 'primary'}
-            sx={{ height: 8, borderRadius: 4 }}
-          />
-        </Box>
+        ) : (
+          <Stack spacing={0}>
+            {/* Title */}
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 750,
+                lineHeight: 1.4,
+                mb: viewDescription ? 2 : 2.5,
+                letterSpacing: '-0.01em',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+                wordBreak: 'break-word',
+              }}
+            >
+              {viewTitle || 'Untitled task'}
+            </Typography>
 
-        <Divider />
-
-        {/* Editable Fields */}
-        <Stack spacing={3}>
-          <TextField
-            select
-            label="Status"
-            value={status}
-            onChange={(e) => {
-              const val = e.target.value;
-              setStatus(val);
-              handleSaveField('status', val);
-            }}
-            fullWidth
-          >
-            {ALL_STATUSES.map((opt) => (
-              <MenuItem key={opt} value={opt}>
-                <Chip label={opt} color={getStatusColor(opt)} size="small" sx={{ fontWeight: 600, height: 24, fontSize: '0.75rem' }} />
-              </MenuItem>
-            ))}
-          </TextField>
-
-          <TextField
-            select
-            label="Assigned Developer"
-            value={developerId}
-            onChange={(e) => {
-              const val = e.target.value;
-              setDeveloperId(val);
-              handleSaveField('developerId', val ? parseInt(val) : null);
-            }}
-            fullWidth
-          >
-            <MenuItem value="">
-              <Stack direction="row" alignItems="center" gap={1}>
-                <Avatar sx={{ width: 24, height: 24, fontSize: '0.75rem', bgcolor: 'grey.300' }}>?</Avatar>
-                <Typography variant="body2"><em>Unassigned</em></Typography>
-              </Stack>
-            </MenuItem>
-            {developers.map((dev) => (
-              <MenuItem key={dev.id} value={dev.id}>
-                <Stack direction="row" alignItems="center" gap={1.5}>
-                  <Avatar sx={{ width: 24, height: 24, fontSize: '0.72rem', bgcolor: dev.color, fontWeight: 700 }}>
-                    {getDevInitials(dev.name)}
-                  </Avatar>
-                  <Typography variant="body2" sx={{ fontWeight: 550 }}>{dev.name}</Typography>
-                </Stack>
-              </MenuItem>
-            ))}
-          </TextField>
-
-          <TextField
-            label="Spent Hours"
-            type="number"
-            value={actualHours}
-            onChange={(e) => setActualHours(e.target.value)}
-            onBlur={() => {
-              const val = actualHours === '' ? null : parseFloat(actualHours);
-              handleSaveField('actualHours', val);
-            }}
-            fullWidth
-            inputProps={{ step: '0.5', min: '0' }}
-            placeholder="e.g. 8.5"
-          />
-
-          <Grid container spacing={2}>
-            <Grid item xs={6}>
-              <TextField
-                label="Phase"
-                value={phase}
-                onChange={(e) => setPhase(e.target.value)}
-                onBlur={() => handleSaveField('phase', phase.trim())}
-                fullWidth
-                placeholder="e.g. Phase 1"
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                label="Week"
-                value={week}
-                onChange={(e) => setWeek(e.target.value)}
-                onBlur={() => handleSaveField('week', week.trim())}
-                fullWidth
-                placeholder="e.g. W1"
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                label="Est. Days"
-                type="number"
-                value={estDays}
-                onChange={(e) => setEstDays(e.target.value)}
-                onBlur={() => {
-                  const val = estDays === '' ? null : parseFloat(estDays);
-                  handleSaveField('estDays', val);
+            {/* Description */}
+            {viewDescription ? (
+              <Box
+                sx={{
+                  mb: 3,
+                  p: 2,
+                  borderRadius: 2,
+                  bgcolor: (t) => (t.palette.mode === 'dark' ? 'grey.900' : 'grey.50'),
+                  border: '1px solid',
+                  borderColor: 'divider',
                 }}
-                fullWidth
-                inputProps={{ step: '0.5', min: '0' }}
-                placeholder="e.g. 5"
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                label="Dependencies"
-                value={dependencies}
-                onChange={(e) => setDependencies(e.target.value)}
-                onBlur={() => handleSaveField('dependencies', dependencies.trim())}
-                fullWidth
-                placeholder="e.g. T-1002"
-              />
-            </Grid>
-          </Grid>
+              >
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: "text.secondary",
+                    fontWeight: 700,
+                    display: 'block',
+                    mb: 0.75,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.6
+                  }}>
+                  Description
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: 'text.primary' }}>
+                  {viewDescription}
+                </Typography>
+              </Box>
+            ) : null}
 
-          <TextField
-            label="Notes & Remarks"
-            multiline
-            rows={4}
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            onBlur={() => handleSaveField('remarks', remarks.trim())}
-            fullWidth
-            placeholder="Log details, next steps, or blocks here..."
-          />
-        </Stack>
+            {/* Compact details — only filled values */}
+            <Box
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 2,
+                px: 2,
+                mb: 3,
+              }}
+            >
+              <DetailRow label="Developer">
+                <Stack
+                  direction="row"
+                  sx={{
+                    alignItems: "center",
+                    gap: 1,
+                    justifyContent: "flex-end"
+                  }}>
+                  {assignedDev && (
+                    <Avatar
+                      sx={{
+                        width: 22,
+                        height: 22,
+                        fontSize: '0.65rem',
+                        bgcolor: assignedDev.color,
+                      }}
+                    >
+                      {getDevInitials(developerLabel)}
+                    </Avatar>
+                  )}
+                  <Typography variant="body2" sx={{ fontWeight: 650 }}>
+                    {developerLabel}
+                  </Typography>
+                </Stack>
+              </DetailRow>
+
+              {form.priority ? (
+                <DetailRow label="Priority">
+                  <Chip
+                    label={form.priority}
+                    color={getPriorityColor(form.priority)}
+                    size="small"
+                    sx={{ height: 22, fontWeight: 700, borderRadius: 2 }}
+                  />
+                </DetailRow>
+              ) : null}
+
+              {form.phase ? (
+                <DetailRow label="Phase">
+                  <Typography variant="body2" sx={{ fontWeight: 650 }}>{form.phase}</Typography>
+                </DetailRow>
+              ) : null}
+
+              {form.module ? (
+                <DetailRow label="Module">
+                  <Typography variant="body2" sx={{ fontWeight: 650 }}>{form.module}</Typography>
+                </DetailRow>
+              ) : null}
+
+              {form.feature ? (
+                <DetailRow label="Feature">
+                  <Typography variant="body2" sx={{ fontWeight: 650 }}>{form.feature}</Typography>
+                </DetailRow>
+              ) : null}
+
+              {form.startDate ? (
+                <DetailRow label="Start">
+                  <Typography variant="body2" sx={{ fontWeight: 650 }}>{formatDate(form.startDate)}</Typography>
+                </DetailRow>
+              ) : null}
+
+              {form.dueDate ? (
+                <DetailRow label="Due">
+                  <Typography variant="body2" sx={{ fontWeight: 650 }}>{formatDate(form.dueDate)}</Typography>
+                </DetailRow>
+              ) : null}
+
+              {form.dependencies ? (
+                <DetailRow label="Depends on">
+                  <Typography variant="body2" sx={{ fontWeight: 650 }}>{form.dependencies}</Typography>
+                </DetailRow>
+              ) : null}
+            </Box>
+
+            {/* Hours */}
+            <Box
+              sx={{
+                p: 2,
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                mb: form.remarks ? 3 : 0,
+              }}
+            >
+              <Stack
+                direction="row"
+                sx={{
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  mb: 1
+                }}>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  Progress
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: "text.secondary",
+                    fontWeight: 600
+                  }}>
+                  {form.status || 'Upcoming'} · {progressPct}%
+                  {est > 0 ? ` · ${act}h / ${est}h` : ''}
+                </Typography>
+              </Stack>
+              <LinearProgress
+                variant="determinate"
+                value={progressPct}
+                color={progressBarColor(progressPct)}
+                sx={{ height: 8, borderRadius: 2 }}
+              />
+            </Box>
+
+            {form.remarks ? (
+              <Box>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: "text.secondary",
+                    fontWeight: 700,
+                    display: 'block',
+                    mb: 0.75,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.6
+                  }}>
+                  {form.status === 'Blocked'
+                    ? 'Block reason'
+                    : form.status === 'On Hold'
+                      ? 'Hold reason'
+                      : 'Notes'}
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                  {form.remarks}
+                </Typography>
+                {(form.status === 'Blocked' || form.status === 'On Hold') && (
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', display: 'block', mt: 0.75 }}
+                  >
+                    Visible on overview timeline
+                  </Typography>
+                )}
+              </Box>
+            ) : null}
+          </Stack>
+        )}
       </Box>
+      {editing && (
+        <Box
+          sx={{
+            px: { xs: 2, sm: 3 },
+            py: 2,
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            display: 'flex',
+            gap: 1.5,
+            bgcolor: 'background.paper',
+            flexShrink: 0,
+            position: 'sticky',
+            bottom: 0,
+            zIndex: 2,
+          }}
+        >
+          <Button
+            fullWidth
+            variant="outlined"
+            onClick={handleCancelEdit}
+            disabled={saving}
+            sx={{ borderRadius: 2, textTransform: 'none' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            fullWidth
+            variant="contained"
+            startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+            onClick={handleSaveChanges}
+            disabled={saving}
+            sx={{ fontWeight: 700, borderRadius: 2, textTransform: 'none' }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </Box>
+      )}
     </Drawer>
   );
 }

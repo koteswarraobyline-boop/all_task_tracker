@@ -15,8 +15,8 @@ exports.getProjectDashboard = async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Fetch all tasks for the project to calculate metrics
-    const tasks = await Task.findAll({
+    // Fetch work items (exclude module container rows from KPIs)
+    const allRows = await Task.findAll({
       where: { projectId },
       include: [{
         model: Developer,
@@ -25,6 +25,7 @@ exports.getProjectDashboard = async (req, res) => {
       }],
       order: [['dueDate', 'ASC'], ['createdAt', 'ASC']]
     });
+    const tasks = allRows.filter((t) => t.recordType !== 'module');
 
     // 1. Summary Cards Calculations
     const totalTasks = tasks.length;
@@ -159,14 +160,6 @@ exports.getProjectDashboard = async (req, res) => {
         completedTasks: runningCompleted
       };
     });
-
-    // If there are no dates, add a placeholder
-    if (taskProgressTimeline.length === 0) {
-      const todayStr = new Date().toISOString().split('T')[0];
-      taskProgressTimeline.push(
-        { date: todayStr, totalTasks: 0, completedTasks: 0 }
-      );
-    }
 
     res.json({
       summary,

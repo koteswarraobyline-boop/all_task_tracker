@@ -1,16 +1,29 @@
-# Deployed with client/dist (document root).
-# Proxies /api to the Node process. PORT must match server/.env (default 5004).
+# Document root should be client/dist (or the folder you upload from dist).
+# Proxies /api to the Node/PM2 process. PORT must match server/.env (default 5004).
 #
 # Requires: mod_rewrite + mod_proxy (+ mod_proxy_http) on Apache/LiteSpeed
+# Prefer forcing HTTPS in cPanel (Domains → Force HTTPS) after SSL is issued.
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
+  RewriteBase /
 
-  # Proxy API requests to Node
+  # Let Let's Encrypt / AutoSSL Domain Control Validation through
+  RewriteRule ^\.well-known/ - [L]
+
+  # Proxy API + health checks to Node (PM2 on 127.0.0.1:5004)
   RewriteRule ^api/(.*)$ http://127.0.0.1:5004/api/$1 [P,L]
 
   # SPA: non-file routes → index.html (React Router /client/:token, etc.)
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^ index.html [L]
+</IfModule>
+
+Options -Indexes
+
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>

@@ -1,6 +1,8 @@
 const Project = require('./project');
 const Developer = require('./developer');
 const Task = require('./task');
+const ClientAccessRecord = require('./clientAccessRecord');
+const AdminCredential = require('./adminCredential');
 
 // Project <-> Task Relationship
 Project.hasMany(Task, {
@@ -24,8 +26,22 @@ Task.belongsTo(Developer, {
   as: 'developer',
 });
 
+// Project <-> ClientAccessRecord Relationship
+Project.hasMany(ClientAccessRecord, {
+  foreignKey: 'project_id',
+  as: 'clientAccessRecords',
+  onDelete: 'CASCADE',
+});
+ClientAccessRecord.belongsTo(Project, {
+  foreignKey: 'project_id',
+  as: 'project',
+  onDelete: 'CASCADE',
+});
+
 module.exports = {
   Project,
   Developer,
   Task,
+  ClientAccessRecord,
+  AdminCredential,
 };

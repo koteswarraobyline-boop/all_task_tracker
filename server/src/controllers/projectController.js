@@ -2,6 +2,13 @@ const fs = require('fs');
 const csv = require('csv-parser');
 const { sequelize } = require('../config/database');
 const { Project, Task, Developer } = require('../models');
+const {
+  detectFlexibleFromRows,
+  parseFlexibleRows,
+  normalizeStatus,
+  parseDate,
+  parseNumber,
+} = require('../utils/csvImport');
 
 // Helper to generate a random hex color
 function getRandomColor() {
@@ -20,22 +27,42 @@ exports.getAllProjects = async (req, res) => {
       include: [{
         model: Task,
         as: 'tasks',
-        attributes: ['id', 'status', 'updatedAt']
+        attributes: [
+          'id', 'status', 'updatedAt', 'recordType', 'startDate', 'dueDate', 'developerId',
+          'priority', 'estimatedHours', 'actualHours', 'module', 'tags', 'description',
+        ],
+        include: [{
+          model: Developer,
+          as: 'developer',
+          attributes: ['id', 'name', 'color'],
+          required: false,
+        }],
       }],
       order: [['createdAt', 'DESC']]
     });
 
+    const priorityRank = (p) => {
+      const v = String(p || '').toLowerCase();
+      if (['high', 'p0', 'p1', 'critical', 'urgent'].includes(v)) return 3;
+      if (['medium', 'p2', 'normal'].includes(v)) return 2;
+      if (['low', 'p3'].includes(v)) return 1;
+      return 0;
+    };
+
     const projectData = projects.map(proj => {
-      const tasks = proj.tasks || [];
+      const allRows = proj.tasks || [];
+      const modules = allRows.filter((t) => t.recordType === 'module');
+      const tasks = allRows.filter((t) => t.recordType !== 'module');
       const totalTasks = tasks.length;
       
       const completed = tasks.filter(t => t.status === 'Completed').length;
       const inDevelopment = tasks.filter(t => t.status === 'In Development').length;
       const blocked = tasks.filter(t => t.status === 'Blocked').length;
       const upcoming = tasks.filter(t => t.status === 'Upcoming').length;
-      // Pending is anything else (Assigned, Code Review, Testing, On Hold)
+      const onHold = tasks.filter(t => t.status === 'On Hold').length;
+      // Pending is anything else (Assigned, Code Review, Testing)
       const pending = tasks.filter(t => 
-        ['Assigned', 'Code Review', 'Testing', 'On Hold'].includes(t.status)
+        ['Assigned', 'Code Review', 'Testing'].includes(t.status)
       ).length;
 
       // Last updated is the latest updatedAt of any task, or project's updatedAt if no tasks
@@ -45,18 +72,105 @@ exports.getAllProjects = async (req, res) => {
         lastUpdated = new Date(Math.max(...dates));
       }
 
+      const startDates = tasks.map((t) => t.startDate).filter(Boolean).sort();
+      const dueDates = tasks.map((t) => t.dueDate).filter(Boolean).sort();
+      const startDate = startDates[0] || (proj.createdAt ? String(proj.createdAt).slice(0, 10) : null);
+      const dueDate = dueDates.length ? dueDates[dueDates.length - 1] : null;
+
+      const memberMap = {};
+      const assignCount = {};
+      tasks.forEach((t) => {
+        if (t.developer && t.developer.id) {
+          memberMap[t.developer.id] = {
+            id: t.developer.id,
+            name: t.developer.name,
+            color: t.developer.color,
+          };
+          assignCount[t.developer.id] = (assignCount[t.developer.id] || 0) + 1;
+        }
+      });
+      const members = Object.values(memberMap);
+      const topDevId = Object.keys(assignCount).sort((a, b) => assignCount[b] - assignCount[a])[0];
+      const manager = topDevId ? memberMap[topDevId] : null;
+
+      let status = 'Active';
+      if (totalTasks > 0 && completed === totalTasks) status = 'Completed';
+      else if (blocked > 0) status = 'Delayed';
+      else if (onHold > 0 && inDevelopment === 0) status = 'On Hold';
+
+      const daysSinceUpdate = lastUpdated
+        ? Math.floor((Date.now() - new Date(lastUpdated).getTime()) / 86400000)
+        : 0;
+      const archived = status === 'Completed' && daysSinceUpdate >= 60;
+
+      const progress = totalTasks > 0 ? Math.round((completed / totalTasks) * 100) : 0;
+
+      let bestPriority = null;
+      let bestRank = -1;
+      tasks.forEach((t) => {
+        if (t.status === 'Completed') return;
+        const r = priorityRank(t.priority);
+        if (r > bestRank) {
+          bestRank = r;
+          bestPriority = t.priority;
+        }
+      });
+      if (!bestPriority) {
+        const any = tasks.find((t) => t.priority);
+        bestPriority = any?.priority || 'Medium';
+      }
+
+      const estimatedHours = tasks.reduce((s, t) => s + (Number(t.estimatedHours) || 0), 0);
+      const actualHours = tasks.reduce((s, t) => s + (Number(t.actualHours) || 0), 0);
+
+      const moduleSet = new Set();
+      [...tasks, ...modules].forEach((t) => {
+        if (t.module) moduleSet.add(String(t.module).trim());
+      });
+
+      const tagSet = new Set();
+      tasks.forEach((t) => {
+        if (!t.tags) return;
+        String(t.tags)
+          .split(/[,|]/)
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .forEach((tag) => tagSet.add(tag));
+      });
+      const tags = Array.from(tagSet).slice(0, 8);
+
+      const description =
+        tasks.find((t) => t.description)?.description ||
+        modules.find((t) => t.description)?.description ||
+        null;
+
       return {
         id: proj.id,
         name: proj.name,
         clientName: proj.clientName,
+        description: description ? String(description).slice(0, 160) : null,
         totalTasks,
         completed,
+        remaining: Math.max(0, totalTasks - completed),
         inDevelopment,
         pending,
         blocked,
         upcoming,
+        onHold,
+        moduleCount: moduleSet.size || modules.length,
+        estimatedHours: Math.round(estimatedHours * 10) / 10,
+        actualHours: Math.round(actualHours * 10) / 10,
+        priority: bestPriority,
+        tags,
+        manager,
         lastUpdated,
-        createdAt: proj.createdAt
+        createdAt: proj.createdAt,
+        startDate,
+        dueDate,
+        members,
+        status,
+        archived,
+        progress,
       };
     });
 
@@ -72,15 +186,15 @@ exports.deleteProject = async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
-    const project = await Project.findByPk(id);
+    const project = await Project.findByPk(id, { transaction });
     if (!project) {
+      await transaction.rollback();
       return res.status(404).json({ error: 'Project not found' });
     }
-    
-    // Cascading delete is configured, but we do it cleanly
+
     await project.destroy({ transaction });
     await transaction.commit();
-    
+
     res.json({ message: 'Project deleted successfully' });
   } catch (error) {
     await transaction.rollback();
@@ -95,8 +209,10 @@ exports.uploadProject = async (req, res) => {
     return res.status(400).json({ error: 'CSV file is required' });
   }
 
-  const { name, clientName, mapping } = req.body;
-  if (!name) {
+  const { name, clientName, mapping, projectId: existingProjectId } = req.body;
+  const appendToProjectId = existingProjectId ? parseInt(existingProjectId, 10) : null;
+
+  if (!appendToProjectId && !name) {
     return res.status(400).json({ error: 'Project name is required' });
   }
 
@@ -130,183 +246,204 @@ exports.uploadProject = async (req, res) => {
 
       const validationErrors = [];
       const taskIdsInCsv = new Set();
-      const mappedTasks = [];
+      let mappedTasks = [];
+      let importFormat = 'legacy';
 
-      // Pre-validation and field mapping
-      for (let i = 0; i < rawRows.length; i++) {
-        const row = rawRows[i];
-        const rowNum = i + 1;
+      const useFlexible = detectFlexibleFromRows(rawRows);
 
-        // Map CSV row to DB fields
-        const taskName = row[columnMap.taskName]?.trim() || '';
-        const rawTaskId = row[columnMap.taskId]?.trim() || '';
-        const module = row[columnMap.module]?.trim() || '';
-        const feature = row[columnMap.feature]?.trim() || '';
-        const description = row[columnMap.description]?.trim() || '';
-        const priority = row[columnMap.priority]?.trim() || '';
-        const rawStatus = row[columnMap.status]?.trim() || '';
-        const rawStartDate = row[columnMap.startDate]?.trim() || '';
-        const rawDueDate = row[columnMap.dueDate]?.trim() || '';
-        const rawEstHours = row[columnMap.estimatedHours]?.trim() || '';
-        const rawActHours = row[columnMap.actualHours]?.trim() || '';
-        const remarks = row[columnMap.remarks]?.trim() || '';
-        const devName = row[columnMap.assignedDeveloper]?.trim() || '';
+      if (useFlexible) {
+        importFormat = 'flexible';
+        const parsed = parseFlexibleRows(rawRows);
+        mappedTasks = parsed.mappedTasks;
+        validationErrors.push(...parsed.validationErrors);
+      } else {
+        // Legacy flat task CSV (column mapping from UI)
+        for (let i = 0; i < rawRows.length; i++) {
+          const row = rawRows[i];
+          const rowNum = i + 2; // header is row 1
 
-        // New fields matching spreadsheet specifications
-        const phase = row[columnMap.phase]?.trim() || '';
-        const week = row[columnMap.week]?.trim() || '';
-        const rawEstDays = row[columnMap.estDays]?.trim() || '';
-        const dependencies = row[columnMap.dependencies]?.trim() || '';
+          const taskName = row[columnMap.taskName]?.trim() || '';
+          const rawTaskId = row[columnMap.taskId]?.trim() || '';
+          const module = row[columnMap.module]?.trim() || '';
+          const feature = row[columnMap.feature]?.trim() || '';
+          const description = row[columnMap.description]?.trim() || '';
+          const priority = row[columnMap.priority]?.trim() || '';
+          const rawStatus = row[columnMap.status]?.trim() || '';
+          const rawStartDate = row[columnMap.startDate]?.trim() || '';
+          const rawDueDate = row[columnMap.dueDate]?.trim() || '';
+          const rawEstHours = row[columnMap.estimatedHours]?.trim() || '';
+          const rawActHours = row[columnMap.actualHours]?.trim() || '';
+          const remarks = row[columnMap.remarks]?.trim() || '';
+          const devName = row[columnMap.assignedDeveloper]?.trim() || '';
+          const phase = row[columnMap.phase]?.trim() || '';
+          const week = row[columnMap.week]?.trim() || '';
+          const rawEstDays = row[columnMap.estDays]?.trim() || '';
+          const dependencies = row[columnMap.dependencies]?.trim() || '';
 
-        // 1. Validate: Missing Task Name
-        if (!taskName) {
-          validationErrors.push(`Row ${rowNum}: Missing Task Name.`);
-        }
-
-        // 2. Validate: Duplicate Task IDs
-        let taskId = rawTaskId;
-        if (columnMap.taskId) {
-          if (!taskId) {
-            validationErrors.push(`Row ${rowNum}: Mapped Task ID column is empty.`);
-          } else if (taskIdsInCsv.has(taskId)) {
-            validationErrors.push(`Row ${rowNum}: Duplicate Task ID '${taskId}' found in file.`);
-          } else {
-            taskIdsInCsv.add(taskId);
+          if (!taskName) {
+            validationErrors.push(`Row ${rowNum}: Missing Task Name.`);
           }
-        } else {
-          // Auto-generate task ID if not mapped
-          taskId = `T-${rowNum}`;
-        }
 
-        // 3. Validate: Invalid Dates
-        let startDate = null;
-        if (rawStartDate) {
-          const parsedStart = new Date(rawStartDate);
-          if (isNaN(parsedStart.getTime())) {
-            validationErrors.push(`Row ${rowNum}: Invalid Start Date format '${rawStartDate}'.`);
+          let taskId = rawTaskId;
+          if (columnMap.taskId) {
+            if (!taskId) {
+              validationErrors.push(`Row ${rowNum}: Mapped Task ID column is empty.`);
+            } else if (taskIdsInCsv.has(taskId)) {
+              validationErrors.push(`Row ${rowNum}: Duplicate Task ID '${taskId}' found in file.`);
+            } else {
+              taskIdsInCsv.add(taskId);
+            }
           } else {
-            startDate = parsedStart.toISOString().split('T')[0];
+            taskId = `T-${rowNum}`;
           }
-        }
 
-        let dueDate = null;
-        if (rawDueDate) {
-          const parsedDue = new Date(rawDueDate);
-          if (isNaN(parsedDue.getTime())) {
-            validationErrors.push(`Row ${rowNum}: Invalid Due Date format '${rawDueDate}'.`);
-          } else {
-            dueDate = parsedDue.toISOString().split('T')[0];
-          }
-        }
+          const startDate = parseDate(rawStartDate, rowNum, 'Start Date', validationErrors);
+          const dueDate = parseDate(rawDueDate, rowNum, 'Due Date', validationErrors);
+          const estimatedHours = parseNumber(rawEstHours, rowNum, 'Estimated Hours', validationErrors);
+          const actualHours = parseNumber(rawActHours, rowNum, 'Actual Hours', validationErrors);
+          const status = normalizeStatus(rawStatus, Boolean(devName), rowNum, validationErrors);
 
-        // Validate hours are numeric
-        let estimatedHours = null;
-        if (rawEstHours) {
-          const est = parseFloat(rawEstHours);
-          if (isNaN(est)) {
-            validationErrors.push(`Row ${rowNum}: Estimated Hours must be a number.`);
-          } else {
-            estimatedHours = est;
-          }
+          mappedTasks.push({
+            rowNum,
+            taskId,
+            parentId: null,
+            recordType: 'task',
+            module,
+            feature,
+            taskName,
+            description,
+            priority,
+            status,
+            startDate,
+            dueDate,
+            estimatedHours,
+            actualHours,
+            remarks,
+            devName,
+            phase,
+            week,
+            estDays: rawEstDays && !isNaN(parseFloat(rawEstDays)) ? parseFloat(rawEstDays) : null,
+            dependencies,
+            tags: null,
+            progressPercent: null,
+            customFields: null,
+          });
         }
-
-        let actualHours = null;
-        if (rawActHours) {
-          const act = parseFloat(rawActHours);
-          if (isNaN(act)) {
-            validationErrors.push(`Row ${rowNum}: Actual Hours must be a number.`);
-          } else {
-            actualHours = act;
-          }
-        }
-
-        // Validate Status matches Enum
-        const validStatuses = [
-          'Upcoming', 'Assigned', 'In Development', 'Code Review',
-          'Testing', 'Completed', 'Blocked', 'On Hold'
-        ];
-        let status = 'Upcoming';
-        if (rawStatus) {
-          // Try to clean status string (case insensitive match)
-          const matched = validStatuses.find(s => s.toLowerCase() === rawStatus.toLowerCase());
-          if (matched) {
-            status = matched;
-          } else {
-            validationErrors.push(`Row ${rowNum}: Invalid Status '${rawStatus}'. Must be one of: ${validStatuses.join(', ')}`);
-          }
-        } else if (devName) {
-          // If developer is assigned but no status, default to 'Assigned'
-          status = 'Assigned';
-        }
-
-        mappedTasks.push({
-          rowNum,
-          taskId,
-          module,
-          feature,
-          taskName,
-          description,
-          priority,
-          status,
-          startDate,
-          dueDate,
-          estimatedHours,
-          actualHours,
-          remarks,
-          devName,
-          phase,
-          week,
-          estDays: rawEstDays && !isNaN(parseFloat(rawEstDays)) ? parseFloat(rawEstDays) : null,
-          dependencies,
-        });
       }
 
       // If any validation errors, return them
       if (validationErrors.length > 0) {
-        return res.status(400).json({ 
-          error: 'Validation failed', 
-          details: validationErrors.slice(0, 50) // Return first 50 errors to avoid overwhelming UI
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: validationErrors.slice(0, 50),
+          format: importFormat,
+        });
+      }
+
+      if (mappedTasks.length === 0) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: ['CSV has no importable Module or Task rows.'],
+          format: importFormat,
         });
       }
 
       // Everything valid. Import in transaction!
       const transaction = await sequelize.transaction();
       try {
-        // Create project
-        const project = await Project.create({
-          name,
-          clientName: clientName || null
-        }, { transaction });
+        let project;
+        if (appendToProjectId) {
+          project = await Project.findByPk(appendToProjectId, { transaction });
+          if (!project) {
+            await transaction.rollback();
+            return res.status(404).json({ error: 'Project not found' });
+          }
 
-        // Resolve developers. Get unique developer names from file.
+          const existingIds = await Task.findAll({
+            where: { projectId: project.id },
+            attributes: ['taskId'],
+            transaction,
+          });
+          const existingSet = new Set(existingIds.map((t) => t.taskId));
+          const conflicts = mappedTasks.filter((t) => existingSet.has(t.taskId));
+          if (conflicts.length > 0) {
+            await transaction.rollback();
+            return res.status(400).json({
+              error: 'Validation failed',
+              details: conflicts.slice(0, 50).map(
+                (t) => `Row ${t.rowNum}: Task ID '${t.taskId}' already exists in this project.`
+              ),
+            });
+          }
+        } else {
+          // Create project
+          project = await Project.create({
+            name,
+            clientName: clientName || null
+          }, { transaction });
+        }
+
+        // Resolve developers. Get unique developer values from file.
         const uniqueDevNames = [...new Set(mappedTasks.map(t => t.devName).filter(Boolean))];
+
+        const parseDeveloperIdentity = (raw) => {
+          const value = String(raw || '').trim();
+          const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+          if (isEmail) {
+            const local = value.split('@')[0] || value;
+            const prettyName = local
+              .replace(/[._-]+/g, ' ')
+              .split(' ')
+              .filter(Boolean)
+              .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+              .join(' ');
+            return { name: prettyName || value, email: value };
+          }
+          return { name: value, email: null };
+        };
         
         // Find existing developers
-        const existingDevs = await Developer.findAll({
-          where: { name: uniqueDevNames },
-          transaction
-        });
-        const devMap = {}; // name -> id
+        const existingDevs = await Developer.findAll({ transaction });
+        const devMap = {}; // lookup key -> id
         existingDevs.forEach(d => {
-          devMap[d.name.toLowerCase()] = d.id;
+          if (d.name) devMap[d.name.toLowerCase()] = d.id;
+          if (d.email) devMap[d.email.toLowerCase()] = d.id;
         });
 
         // Create new developers for those that don't exist
-        for (const devName of uniqueDevNames) {
-          if (!devMap[devName.toLowerCase()]) {
-            const newDev = await Developer.create({
-              name: devName,
-              color: getRandomColor()
-            }, { transaction });
-            devMap[devName.toLowerCase()] = newDev.id;
+        for (const rawDev of uniqueDevNames) {
+          const identity = parseDeveloperIdentity(rawDev);
+          const lookupKeys = [rawDev.toLowerCase(), identity.name.toLowerCase()];
+          if (identity.email) lookupKeys.push(identity.email.toLowerCase());
+
+          const existingId = lookupKeys.map((k) => devMap[k]).find(Boolean);
+          if (existingId) {
+            lookupKeys.forEach((k) => { devMap[k] = existingId; });
+            continue;
           }
+
+          const newDev = await Developer.create({
+            name: identity.name,
+            email: identity.email,
+            color: getRandomColor()
+          }, { transaction });
+
+          lookupKeys.forEach((k) => { devMap[k] = newDev.id; });
+          if (identity.email) devMap[identity.email.toLowerCase()] = newDev.id;
+          devMap[identity.name.toLowerCase()] = newDev.id;
         }
 
         // Prepare tasks
         const tasksToInsert = mappedTasks.map(task => ({
           projectId: project.id,
-          developerId: task.devName ? devMap[task.devName.toLowerCase()] : null,
+          developerId: task.devName
+            ? (devMap[task.devName.toLowerCase()]
+              || devMap[parseDeveloperIdentity(task.devName).name.toLowerCase()]
+              || null)
+            : null,
           taskId: task.taskId,
+          parentId: task.parentId || null,
+          recordType: task.recordType || 'task',
           module: task.module || null,
           feature: task.feature || null,
           taskName: task.taskName,
@@ -322,16 +459,27 @@ exports.uploadProject = async (req, res) => {
           week: task.week || null,
           estDays: task.estDays,
           dependencies: task.dependencies || null,
+          tags: task.tags || null,
+          progressPercent: task.progressPercent,
+          customFields: task.customFields || null,
         }));
 
         // Bulk create tasks
         await Task.bulkCreate(tasksToInsert, { transaction });
         await transaction.commit();
 
-        res.status(201).json({ 
-          message: 'Project imported successfully', 
-          projectId: project.id, 
-          taskCount: tasksToInsert.length 
+        const moduleCount = tasksToInsert.filter((t) => t.recordType === 'module').length;
+        const taskCount = tasksToInsert.filter((t) => t.recordType !== 'module').length;
+
+        res.status(201).json({
+          message: appendToProjectId
+            ? 'CSV imported into project successfully'
+            : 'Project imported successfully',
+          projectId: project.id,
+          taskCount: tasksToInsert.length,
+          moduleCount,
+          workItemCount: taskCount,
+          format: importFormat,
         });
       } catch (dbError) {
         await transaction.rollback();

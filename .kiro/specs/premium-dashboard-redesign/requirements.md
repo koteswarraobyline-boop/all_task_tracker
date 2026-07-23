@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This document defines the requirements for redesigning the existing DevTask Tracker SaaS dashboard into a premium, award-winning UI that matches the visual quality of Linear, Vercel, Stripe, and Notion. The redesign targets the React + Vite frontend (client/) and covers all shared components (Sidebar, Navbar, Cards, Tables, Charts) and all pages (Dashboard, Developers, Projects, ProjectTaskBoard, Reports, Settings, UploadProject). The existing MUI + Framer Motion + Recharts stack is retained; no new libraries are added. All functional behavior is preserved — only the visual layer and motion layer are upgraded.
+This document defines the requirements for redesigning the existing Task Tracker SaaS dashboard into a premium, award-winning UI that matches the visual quality of Linear, Vercel, Stripe, and Notion. The redesign targets the React + Vite frontend (client/) and covers all shared components (Sidebar, Navbar, Cards, Tables, Charts) and all pages (Dashboard, Developers, Projects, ProjectTaskBoard, Reports, Settings, UploadProject). The existing MUI + Framer Motion + Recharts stack is retained; no new libraries are added. All functional behavior is preserved — only the visual layer and motion layer are upgraded.
 
 ## Glossary
 
@@ -52,7 +52,7 @@ This document defines the requirements for redesigning the existing DevTask Trac
 #### Acceptance Criteria
 
 1. THE Sidebar SHALL render as a floating panel positioned 16px from the top and left viewport edges with 24px border-radius and a level-1 shadow.
-2. THE Sidebar SHALL display the brand logo icon and "DevTask Tracker" wordmark with a gradient text treatment using Primary_Color and secondary color.
+2. THE Sidebar SHALL display the brand logo icon and "Task Tracker" wordmark with a gradient text treatment using Primary_Color and secondary color.
 3. WHEN a navigation item is active, THE Sidebar SHALL display a filled primary-color background on that item with white icon and text.
 4. WHEN a navigation item is hovered, THE Sidebar SHALL animate the background to a soft primary-tint (`rgba(99,102,241,0.08)`) within 200ms.
 5. THE Sidebar SHALL display section labels ("WORKSPACE", "ACTIVE PROJECT") in uppercase caption style above their respective nav groups.

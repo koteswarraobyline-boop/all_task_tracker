@@ -1,105 +1,304 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Typography,
   Paper,
-  Tabs,
-  Tab,
-  Grid,
-  Card,
-  CardContent,
-  Chip,
-  Avatar,
-  IconButton,
   Button,
   Stack,
-  Tooltip,
   CircularProgress,
   Snackbar,
   Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Collapse,
-  Select,
-  MenuItem,
-  InputBase,
-  InputAdornment,
-  LinearProgress,
-  useTheme,
   TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  MenuItem,
+  useTheme,
 } from '@mui/material';
 import {
-  Search as SearchIcon,
-  Clear as ClearIcon,
-  KeyboardArrowDown as ExpandIcon,
   Refresh as RefreshIcon,
-  Done as DoneIcon,
-  OpenInNew as LaunchIcon,
-  AssignmentOutlined as AssignmentIcon,
-  CheckCircleOutlined as CheckCircleIcon,
-  CodeOutlined as CodeIcon,
   CalendarTodayOutlined as CalendarIcon,
+  Add as AddIcon,
+  Upload as UploadIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
 import TaskDetailsDrawer from '../components/TaskDetailsDrawer';
-import Dashboard from './Dashboard';
+import KanbanBoard from '../components/KanbanBoard';
+import {
+  TaskBoardToolbar,
+  HierarchicalTaskTable,
+  ALL_STATUSES,
+  PRIORITY_BADGES_LIGHT,
+  PRIORITY_BADGES_DARK,
+} from '../components/TaskBoard';
+import { useProjectId } from '../hooks/useProjectId';
+import { usePermission } from '../hooks/usePermission';
+import { useRole } from '../context/RoleContext';
+import EmptyState from '../components/EmptyState';
+import StatusRemarkDialog, { needsStatusRemark } from '../components/StatusRemarkDialog';
+import { getDeveloperDisplayName } from '../utils/developerDisplay';
 
-const PRIORITY_BADGES = {
-  'P0': { color: '#EF4444', bgcolor: '#FEF2F2', borderColor: '#FCA5A5' }, // Red
-  'P1': { color: '#F59E0B', bgcolor: '#FEF3C7', borderColor: '#FDE047' }, // Orange
-  'P2': { color: '#3B82F6', bgcolor: '#EFF6FF', borderColor: '#BFDBFE' }, // Blue
-  'P3': { color: '#10B981', bgcolor: '#ECFDF5', borderColor: '#A7F3D0' }, // Green
+const EMPTY_FILTERS = {
+  sprint: '',
+  phases: [],
+  modules: [],
+  developer: '',
+  statuses: [],
+  priority: '',
 };
 
-const ALL_STATUSES = [
-  'Upcoming', 'Assigned', 'In Development', 'Code Review',
-  'Testing', 'Completed', 'Blocked', 'On Hold'
-];
+function normalizeWeekKey(raw) {
+  let weekKey = (raw || 'Unscheduled').trim();
+  if (!weekKey) weekKey = 'Unscheduled';
+  const lower = weekKey.toLowerCase();
+  if (lower.startsWith('week') || lower.startsWith('sprint')) {
+    const num = weekKey.match(/\d+/);
+    if (num) weekKey = `W${num[0]}`;
+  } else if (lower.startsWith('w') && weekKey.length > 1) {
+    weekKey = weekKey.toUpperCase();
+  }
+  return weekKey;
+}
+
+/** Build Phase → Module → Task tree from work items + module metadata */
+function buildPhaseTree(workTasks, allTasks, developers) {
+  const modulesById = {};
+  allTasks.forEach((t) => {
+    if (t.recordType === 'module') modulesById[t.taskId] = t;
+  });
+
+  const phases = {};
+
+  const ensurePhase = (name) => {
+    const key = name || 'Unassigned Phase';
+    if (!phases[key]) {
+      phases[key] = {
+        id: key,
+        name: key,
+        modules: {},
+        taskCount: 0,
+        completedTasks: 0,
+        developerIds: new Set(),
+      };
+    }
+    return phases[key];
+  };
+
+  const ensureModule = (phase, moduleKey, seed = {}) => {
+    if (!phase.modules[moduleKey]) {
+      phase.modules[moduleKey] = {
+        id: `${phase.id}::${moduleKey}`,
+        moduleId: moduleKey,
+        name: seed.name || '',
+        parentTask: seed.parentTask || null,
+        tasks: [],
+        completedTasks: 0,
+        taskCount: 0,
+        ownerName: '',
+      };
+    }
+    return phase.modules[moduleKey];
+  };
+
+  workTasks.forEach((t) => {
+    const phase = ensurePhase(t.phase);
+    let moduleKey = 'Unassigned';
+    let seed = { name: 'Standalone tasks' };
+
+    if (t.parentId && modulesById[t.parentId]) {
+      moduleKey = t.parentId;
+      seed = {
+        name: modulesById[t.parentId].taskName,
+        parentTask: modulesById[t.parentId],
+      };
+    } else if (t.module && String(t.module).includes('-')) {
+      moduleKey = String(t.module).split('-')[0];
+      const mod = modulesById[moduleKey];
+      seed = { name: mod?.taskName || moduleKey, parentTask: mod || null };
+    } else if (t.module && modulesById[t.module]) {
+      moduleKey = t.module;
+      seed = {
+        name: modulesById[t.module].taskName,
+        parentTask: modulesById[t.module],
+      };
+    } else if (t.module) {
+      moduleKey = t.module;
+      seed = { name: t.module };
+    }
+
+    const mod = ensureModule(phase, moduleKey, seed);
+    if (seed.parentTask) mod.parentTask = seed.parentTask;
+    if (seed.name) mod.name = seed.name;
+    mod.tasks.push(t);
+  });
+
+  return Object.values(phases)
+    .map((phase) => {
+      const modules = Object.values(phase.modules)
+        .map((mod) => {
+          mod.tasks.sort((a, b) =>
+            String(a.taskId || '').localeCompare(String(b.taskId || ''), undefined, {
+              numeric: true,
+            })
+          );
+          const completed = mod.tasks.filter((t) => t.status === 'Completed').length;
+          const total = mod.tasks.length;
+          const owner =
+            mod.parentTask &&
+            developers.find(
+              (d) =>
+                d.id === mod.parentTask.developerId ||
+                d.id === parseInt(mod.parentTask.developerId, 10)
+            );
+          return {
+            ...mod,
+            taskCount: total,
+            completedTasks: completed,
+            completionPct: total > 0 ? Math.round((completed / total) * 100) : 0,
+            ownerName: owner ? getDeveloperDisplayName(owner) : '',
+          };
+        })
+        .sort((a, b) =>
+          String(a.moduleId).localeCompare(String(b.moduleId), undefined, { numeric: true })
+        );
+
+      let taskCount = 0;
+      let completedTasks = 0;
+      const developerIds = new Set();
+      modules.forEach((m) => {
+        taskCount += m.taskCount;
+        completedTasks += m.completedTasks;
+        m.tasks.forEach((t) => {
+          if (t.developerId) developerIds.add(t.developerId);
+        });
+      });
+
+      return {
+        id: phase.id,
+        name: phase.name,
+        modules,
+        taskCount,
+        completedTasks,
+        completionPct: taskCount > 0 ? Math.round((completedTasks / taskCount) * 100) : 0,
+        developerCount: developerIds.size,
+      };
+    })
+    .filter((p) => p.taskCount > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
 
 export default function ProjectTaskBoard() {
-  const { id: projectId } = useParams();
+  const projectId = useProjectId();
   const navigate = useNavigate();
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+  const { role, project: clientProject, clientMeta } = useRole();
+  const isClient = role === 'client';
+  const canStatusPerm = usePermission('task.status');
+  const canAssignPerm = usePermission('task.assign');
+  const canEditPerm = usePermission('task.edit');
+  // Clients are view-only — never allow edit/status/assign UI
+  const canStatus = !isClient && canStatusPerm;
+  const canAssign = !isClient && canAssignPerm;
+  const canEdit = !isClient && canEditPerm;
 
-  // Data States
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [developers, setDevelopers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [customSprints, setCustomSprints] = useState([]);
+  const [addSprintOpen, setAddSprintOpen] = useState(false);
+  const [newSprintName, setNewSprintName] = useState('');
 
-  // Tab State: 'overview', 'sprint-planner', or a specific phase name
-  const [activeTab, setActiveTab] = useState('sprint-planner');
-  
-  // Status Key Filters (array of active statuses, empty means all)
-  const [activeStatusFilters, setActiveStatusFilters] = useState([]);
-  
-  // Search query
+  const [searchParams] = useSearchParams();
+  const [boardLayout, setBoardLayout] = useState(() => {
+    const view = searchParams.get('view');
+    if (view === 'kanban') return 'kanban';
+    if (view === 'list' || view === 'table') return 'table';
+    try {
+      return localStorage.getItem('tt_task_board_layout') || 'table';
+    } catch {
+      return 'table';
+    }
+  });
+
+  useEffect(() => {
+    const view = searchParams.get('view');
+    if (view === 'kanban') setBoardLayout('kanban');
+    else if (view === 'list' || view === 'table') setBoardLayout('table');
+  }, [searchParams]);
+
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Collapsed parents mapping (parentId -> boolean)
-  const [expandedParents, setExpandedParents] = useState({});
+  const [expandedPhases, setExpandedPhases] = useState({});
+  const [expandedModules, setExpandedModules] = useState({});
 
-  // Drawer States
   const [selectedTask, setSelectedTask] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerStartEdit, setDrawerStartEdit] = useState(false);
   const [alert, setAlert] = useState({ open: false, message: '', severity: 'success' });
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
+  const [statusRemark, setStatusRemark] = useState({
+    open: false,
+    taskId: null,
+    status: '',
+    taskName: '',
+    initialRemark: '',
+    saving: false,
+  });
+  const [newTask, setNewTask] = useState({
+    taskName: '',
+    taskId: '',
+    status: 'Upcoming',
+    developerId: '',
+    week: '',
+    phase: '',
+    priority: '',
+    module: '',
+    description: '',
+  });
 
   const showAlert = (message, severity = 'success') => {
     setAlert({ open: true, message, severity });
   };
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('tt_task_board_layout', boardLayout);
+    } catch {
+      /* ignore */
+    }
+  }, [boardLayout]);
+
   const loadData = async () => {
     try {
       setLoading(true);
+      setLoadError(false);
+
+      if (role === 'client') {
+        const token = clientMeta?.token;
+        if (!token) {
+          setLoadError(true);
+          return;
+        }
+        const sharePassword = sessionStorage.getItem(`share-password:${token}`) || undefined;
+        const data = await api.getClientTasks(token, sharePassword);
+        setProject(data.project);
+        setTasks(data.tasks || []);
+        setDevelopers(data.developers || []);
+        return;
+      }
+
+      if (!projectId) return;
+
       const projectsData = await api.getProjects();
-      const curProj = projectsData.find(p => p.id === parseInt(projectId));
+      const curProj = projectsData.find((p) => p.id === parseInt(projectId, 10));
       setProject(curProj || { name: `Project #${projectId}` });
 
       const devsData = await api.getDevelopers();
@@ -109,6 +308,7 @@ export default function ProjectTaskBoard() {
       setTasks(tasksResponse.tasks);
     } catch (e) {
       console.error('Failed to load board tasks data:', e);
+      setLoadError(true);
       showAlert('Failed to load project details', 'error');
     } finally {
       setLoading(false);
@@ -117,273 +317,379 @@ export default function ProjectTaskBoard() {
 
   useEffect(() => {
     loadData();
-  }, [projectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, role, clientMeta?.token]);
 
-  // Extract unique phases dynamically from tasks to construct top tabs
-  const phaseList = useMemo(() => {
-    const phases = tasks.map(t => t.phase).filter(Boolean);
-    return [...new Set(phases)].sort();
-  }, [tasks]);
-
-  // Handle Tab Switch
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
-    setActiveStatusFilters([]); // Reset filters on tab switch
-    setSearchQuery('');
+  const applyStatusUpdate = async (taskId, newStatus, remarks) => {
+    const payload = { status: newStatus };
+    if (remarks != null) payload.remarks = remarks;
+    const updated = await api.updateTask(taskId, payload);
+    showAlert('Task status updated successfully');
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+    if (selectedTask && selectedTask.id === taskId) setSelectedTask(updated);
+    return updated;
   };
 
-  // Inline status updates
   const handleStatusChange = async (taskId, newStatus, event) => {
     if (event) event.stopPropagation();
+    if (!canStatus) return;
+
+    if (needsStatusRemark(newStatus)) {
+      const task = tasks.find((t) => t.id === taskId);
+      setStatusRemark({
+        open: true,
+        taskId,
+        status: newStatus,
+        taskName: task?.taskName || task?.taskId || '',
+        initialRemark: task?.remarks || '',
+        saving: false,
+      });
+      return;
+    }
+
     try {
-      const updated = await api.updateTask(taskId, { status: newStatus });
-      showAlert('Task status updated successfully');
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
-      if (selectedTask && selectedTask.id === taskId) {
-        setSelectedTask(updated);
-      }
+      await applyStatusUpdate(taskId, newStatus);
     } catch (error) {
       console.error('Inline status update failed:', error);
       showAlert('Failed to update status', 'error');
     }
   };
 
+  const handleStatusRemarkConfirm = async (remark) => {
+    const { taskId, status } = statusRemark;
+    if (!taskId || !status) return;
+    setStatusRemark((prev) => ({ ...prev, saving: true }));
+    try {
+      await applyStatusUpdate(taskId, status, remark);
+      setStatusRemark({
+        open: false,
+        taskId: null,
+        status: '',
+        taskName: '',
+        initialRemark: '',
+        saving: false,
+      });
+    } catch (error) {
+      console.error('Status remark update failed:', error);
+      showAlert('Failed to update status', 'error');
+      setStatusRemark((prev) => ({ ...prev, saving: false }));
+    }
+  };
+
+  const handleStatusRemarkCancel = () => {
+    if (statusRemark.saving) return;
+    setStatusRemark({
+      open: false,
+      taskId: null,
+      status: '',
+      taskName: '',
+      initialRemark: '',
+      saving: false,
+    });
+  };
+
   const handleDeveloperChange = async (taskId, newDeveloperId, event) => {
     if (event) event.stopPropagation();
+    if (!canAssign) return;
     try {
-      const devId = newDeveloperId ? parseInt(newDeveloperId) : null;
+      const devId = newDeveloperId ? parseInt(newDeveloperId, 10) : null;
       const updated = await api.updateTask(taskId, { developerId: devId });
       showAlert('Task assignment updated successfully');
       setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
-      if (selectedTask && selectedTask.id === taskId) {
-        setSelectedTask(updated);
-      }
+      if (selectedTask && selectedTask.id === taskId) setSelectedTask(updated);
     } catch (error) {
       console.error('Inline assignment update failed:', error);
       showAlert('Failed to update assignment', 'error');
     }
   };
 
-  const handleRowClick = (taskItem) => {
+  const handleWeekChange = async (taskId, newWeek, event) => {
+    if (event) event.stopPropagation();
+    if (!canEdit) return;
+    try {
+      const updated = await api.updateTask(taskId, { week: newWeek || null });
+      showAlert('Sprint updated');
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+      if (selectedTask && selectedTask.id === taskId) setSelectedTask(updated);
+    } catch (error) {
+      console.error('Week update failed:', error);
+      showAlert('Failed to update sprint', 'error');
+    }
+  };
+
+  const handleAddSprint = () => {
+    const trimmed = newSprintName.trim();
+    if (!trimmed) {
+      showAlert('Enter a sprint name (e.g. W4 or Sprint 4)', 'warning');
+      return;
+    }
+    const key = normalizeWeekKey(trimmed);
+    const exists =
+      customSprints.includes(key) || tasks.some((t) => normalizeWeekKey(t.week) === key);
+    if (exists) {
+      showAlert(`Sprint ${key} already exists`, 'warning');
+      return;
+    }
+    setCustomSprints((prev) => [...prev, key]);
+    setNewSprintName('');
+    setAddSprintOpen(false);
+    showAlert(`Sprint ${key} added — use Sprint column to assign tasks`);
+  };
+
+  const handleRowClick = (taskItem, startEdit = false) => {
     setSelectedTask(taskItem);
+    setDrawerStartEdit(Boolean(startEdit));
     setDrawerOpen(true);
   };
 
   const handleTaskUpdated = (updatedTask) => {
     setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
     setSelectedTask(updatedTask);
+    showAlert('Task saved successfully');
   };
 
-  // Toggle expand/collapse for a parent row
-  const toggleParent = (parentId) => {
-    setExpandedParents((prev) => ({
-      ...prev,
-      [parentId]: !prev[parentId],
-    }));
+  const handleFilterChange = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  // Status Badge/Chip styles matching screenshot specifications
-  const getStatusStyle = (statusVal) => {
-    switch (statusVal) {
-      case 'Completed':
-        return { bgcolor: '#ECFDF5', color: '#10B981', border: '1px solid #A7F3D0', text: '✓ COMPLETED' };
-      case 'In Development':
-        return { bgcolor: '#EFF6FF', color: '#3B82F6', border: '1px solid #BFDBFE', text: '⧗ IN DEVELOPMENT' };
-      case 'Testing':
-        return { bgcolor: '#FAF5FF', color: '#A855F7', border: '1px solid #E9D5FF', text: '🧪 TESTING' };
-      case 'Code Review':
-        return { bgcolor: '#EEF2F6', color: '#4F46E5', border: '1px solid #C7D2FE', text: '👁 CODE REVIEW' };
-      case 'Blocked':
-        return { bgcolor: '#FEF2F2', color: '#EF4444', border: '1px solid #FCA5A5', text: '🛇 BLOCKED' };
-      case 'On Hold':
-        return { bgcolor: '#FFF7ED', color: '#F97316', border: '1px solid #FFEDD5', text: '⏸ ON HOLD' };
-      case 'Upcoming':
-      case 'Planned':
-        return { bgcolor: '#F8FAFC', color: '#64748B', border: '1px solid #E2E8F0', text: '⚙ PLANNED' };
-      default:
-        return { bgcolor: '#F8FAFC', color: '#64748B', border: '1px solid #E2E8F0', text: statusVal?.toUpperCase() };
-    }
+  const clearFilters = () => {
+    setFilters(EMPTY_FILTERS);
+    setSearchQuery('');
   };
 
-  const getDevInitials = (name) => {
-    if (!name) return '';
-    return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
-  };
-
-  // Toggle status filter from the keybar
-  const toggleStatusFilter = (statusVal) => {
-    setActiveStatusFilters((prev) => {
-      if (prev.includes(statusVal)) {
-        return prev.filter((s) => s !== statusVal);
-      } else {
-        return [...prev, statusVal];
-      }
-    });
-  };
-
-  // Filter Tasks list by active tab and status filters
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
-      // 1. Filter by Active Phase Tab
-      if (activeTab !== 'overview' && activeTab !== 'sprint-planner') {
-        if (task.phase !== activeTab) return false;
+      if (boardLayout !== 'kanban' && filters.statuses.length > 0) {
+        if (!filters.statuses.includes(task.status)) return false;
       }
 
-      // 2. Filter by Status Key Pills
-      if (activeStatusFilters.length > 0) {
-        if (!activeStatusFilters.includes(task.status)) return false;
+      if (filters.sprint) {
+        if (normalizeWeekKey(task.week) !== filters.sprint) return false;
       }
 
-      // 3. Filter by Search Query
+      if (filters.phases.length > 0) {
+        if (!filters.phases.includes(task.phase || 'Unassigned Phase')) return false;
+      }
+
+      if (filters.modules.length > 0) {
+        const modKey =
+          task.parentId ||
+          (task.module && String(task.module).includes('-')
+            ? String(task.module).split('-')[0]
+            : task.module) ||
+          'Unassigned';
+        if (!filters.modules.includes(modKey) && !filters.modules.includes(task.module)) {
+          return false;
+        }
+      }
+
+      if (filters.developer !== '' && filters.developer != null) {
+        const id = parseInt(filters.developer, 10);
+        if (task.developerId !== id) return false;
+      }
+
+      if (filters.priority) {
+        if (task.priority !== filters.priority) return false;
+      }
+
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        const matchId = task.taskId?.toLowerCase().includes(query);
-        const matchName = task.taskName?.toLowerCase().includes(query);
-        const matchModule = task.module?.toLowerCase().includes(query);
-        if (!matchId && !matchName && !matchModule) return false;
+        const dev = developers.find(
+          (d) => d.id === task.developerId || d.id === parseInt(task.developerId, 10)
+        );
+        const devName = getDeveloperDisplayName(dev).toLowerCase();
+        const sprint = normalizeWeekKey(task.week).toLowerCase();
+        const match =
+          task.taskId?.toLowerCase().includes(query) ||
+          task.taskName?.toLowerCase().includes(query) ||
+          task.module?.toLowerCase().includes(query) ||
+          task.phase?.toLowerCase().includes(query) ||
+          task.description?.toLowerCase().includes(query) ||
+          sprint.includes(query) ||
+          devName.includes(query);
+        if (!match) return false;
       }
 
       return true;
     });
-  }, [tasks, activeTab, activeStatusFilters, searchQuery]);
+  }, [tasks, filters, searchQuery, boardLayout, developers]);
 
-  // Compute Grouped Task Data for Hierarchical Phase view
-  const hierarchicalData = useMemo(() => {
-    // 1. Group tasks by base Module (parent)
-    const groups = {};
-    filteredTasks.forEach((t) => {
-      // Check if module looks like a child (contains a dash: e.g. 1.13-1)
-      const isChild = t.module && t.module.includes('-');
-      const parentModuleId = isChild ? t.module.split('-')[0] : t.module || 'Unassigned';
+  const workTasks = useMemo(
+    () => filteredTasks.filter((t) => t.recordType !== 'module'),
+    [filteredTasks]
+  );
 
-      if (!groups[parentModuleId]) {
-        groups[parentModuleId] = {
-          moduleId: parentModuleId,
-          name: isChild ? '' : t.taskName, // Parent row takes name from parent task
-          description: isChild ? '' : t.description,
-          status: 'Upcoming',
-          priority: 'P2',
-          week: t.week,
-          phase: t.phase,
-          notes: t.remarks,
-          isRealParent: !isChild,
-          tasks: [],
-          parentTask: null
-        };
-      }
+  const pagedWorkTasks = useMemo(
+    () => workTasks.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
+    [workTasks, page, rowsPerPage]
+  );
 
-      if (isChild) {
-        groups[parentModuleId].tasks.push(t);
-      } else {
-        groups[parentModuleId].parentTask = t;
-        groups[parentModuleId].name = t.taskName;
-        groups[parentModuleId].description = t.description;
-        groups[parentModuleId].status = t.status;
-        groups[parentModuleId].priority = t.priority || 'P2';
-        groups[parentModuleId].week = t.week;
-        groups[parentModuleId].phase = t.phase;
-        groups[parentModuleId].notes = t.remarks;
-      }
-    });
+  const phaseTree = useMemo(
+    () => buildPhaseTree(pagedWorkTasks, tasks, developers),
+    [pagedWorkTasks, tasks, developers]
+  );
 
-    // Resolve details for parent groups, sorting their child tasks
-    const resolvedGroups = Object.values(groups).map((group) => {
-      // Sort sub-tasks by their numerical sub-id (e.g. 1.13-1, 1.13-2)
-      group.tasks.sort((a, b) => {
-        const subA = parseInt(a.module.split('-')[1] || 0);
-        const subB = parseInt(b.module.split('-')[1] || 0);
-        return subA - subB;
+  useEffect(() => {
+    setPage(0);
+  }, [searchQuery, filters, rowsPerPage]);
+
+  // Expand newly visible phases/modules by default
+  useEffect(() => {
+    setExpandedPhases((prev) => {
+      const next = { ...prev };
+      phaseTree.forEach((p) => {
+        if (next[p.id] === undefined) next[p.id] = true;
       });
-
-      // Calculate aggregate stats for parent row progress
-      const children = group.parentTask ? [group.parentTask, ...group.tasks] : group.tasks;
-      const total = children.length;
-      const completed = children.filter((t) => t.status === 'Completed').length;
-      const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-      // Parent status falls back based on children
-      let parentStatus = group.status;
-      if (total > 0) {
-        if (completed === total) parentStatus = 'Completed';
-        else if (children.some(t => t.status === 'In Development')) parentStatus = 'In Development';
-        else if (children.some(t => t.status === 'Testing')) parentStatus = 'Testing';
-        else if (children.some(t => t.status === 'Code Review')) parentStatus = 'Code Review';
-        else if (children.some(t => t.status === 'Blocked')) parentStatus = 'Blocked';
-      }
-
-      return {
-        ...group,
-        totalTasks: total,
-        completedTasks: completed,
-        completionPct: pct,
-        status: parentStatus
-      };
+      return next;
     });
-
-    // Sort parent modules alphabetically/numerically by Module ID
-    resolvedGroups.sort((a, b) => {
-      return a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true, sensitivity: 'base' });
-    });
-
-    return resolvedGroups;
-  }, [filteredTasks]);
-
-  // Compute Week-Grouped Data for Sprint Planner view
-  const sprintPlannerWeeks = useMemo(() => {
-    const weeks = {};
-    filteredTasks.forEach((t) => {
-      // Normalize week code (e.g., 'W1' or 'Week 1' -> 'W1')
-      let weekKey = t.week || 'Unscheduled';
-      if (weekKey.toLowerCase().startsWith('week')) {
-        const num = weekKey.match(/\d+/);
-        if (num) weekKey = `W${num[0]}`;
-      } else if (weekKey.toLowerCase().startsWith('w') && weekKey.length > 1) {
-        weekKey = weekKey.toUpperCase();
-      }
-
-      if (!weeks[weekKey]) {
-        weeks[weekKey] = {
-          weekId: weekKey,
-          tasks: []
-        };
-      }
-      weeks[weekKey].tasks.push(t);
-    });
-
-    // Sort weeks chronologically
-    const sortedWeeks = Object.values(weeks).sort((a, b) => {
-      if (a.weekId === 'Unscheduled') return 1;
-      if (b.weekId === 'Unscheduled') return -1;
-      return a.weekId.localeCompare(b.weekId, undefined, { numeric: true });
-    });
-
-    // Sort tasks inside each week by Module ID
-    sortedWeeks.forEach(w => {
-      w.tasks.sort((a, b) => {
-        return (a.module || '').localeCompare((b.module || ''), undefined, { numeric: true });
+    setExpandedModules((prev) => {
+      const next = { ...prev };
+      phaseTree.forEach((p) => {
+        p.modules.forEach((m) => {
+          if (next[m.id] === undefined) next[m.id] = true;
+        });
       });
+      return next;
     });
+  }, [phaseTree]);
 
-    return sortedWeeks;
-  }, [filteredTasks]);
+  const availableSprintOptions = useMemo(() => {
+    const keys = new Set(customSprints);
+    tasks.forEach((t) => {
+      if (t.week) keys.add(normalizeWeekKey(t.week));
+    });
+    return Array.from(keys)
+      .filter((k) => k !== 'Unscheduled')
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [tasks, customSprints]);
 
-  // General counts for current view (dynamic KPIs)
-  const viewKPIs = useMemo(() => {
-    const total = filteredTasks.length;
-    const completed = filteredTasks.filter(t => t.status === 'Completed').length;
-    const inDev = filteredTasks.filter(t => t.status === 'In Development').length;
-    const planned = filteredTasks.filter(t => ['Upcoming', 'Assigned', 'Planned'].includes(t.status)).length;
+  const filterOptions = useMemo(() => {
+    const phases = [
+      ...new Set(tasks.map((t) => t.phase || 'Unassigned Phase').filter(Boolean)),
+    ]
+      .sort()
+      .map((p) => ({ value: p, label: p }));
+
+    const moduleMap = new Map();
+    tasks.forEach((t) => {
+      if (t.recordType === 'module' && !t.parentId) {
+        moduleMap.set(t.taskId, t.taskName || t.taskId);
+      } else if (t.module) {
+        const key = String(t.module).includes('-')
+          ? String(t.module).split('-')[0]
+          : t.module;
+        if (!moduleMap.has(key)) moduleMap.set(key, key);
+      }
+    });
+    const modules = Array.from(moduleMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+      .map(([value, label]) => ({
+        value,
+        label: label === value ? `Module ${value}` : `Module ${value} — ${label}`,
+      }));
+
+    const priorities = [
+      ...new Set(tasks.map((t) => t.priority).filter(Boolean)),
+    ]
+      .sort()
+      .map((p) => ({ value: p, label: p }));
 
     return {
-      total,
-      completed,
-      completedPct: total > 0 ? Math.round((completed / total) * 100) : 0,
-      inDev,
-      inDevPct: total > 0 ? Math.round((inDev / total) * 100) : 0,
-      planned,
-      plannedPct: total > 0 ? Math.round((planned / total) * 100) : 0,
+      sprints: availableSprintOptions.map((s) => ({ value: s, label: s })),
+      phases,
+      modules,
+      developers: developers.map((d) => ({
+        value: String(d.id),
+        label: getDeveloperDisplayName(d),
+      })),
+      priorities,
     };
-  }, [filteredTasks]);
+  }, [tasks, developers, availableSprintOptions]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (filters.sprint) n += 1;
+    if (filters.phases.length) n += 1;
+    if (filters.modules.length) n += 1;
+    if (filters.developer !== '' && filters.developer != null) n += 1;
+    if (filters.statuses.length) n += 1;
+    if (filters.priority) n += 1;
+    if (searchQuery.trim()) n += 1;
+    return n;
+  }, [filters, searchQuery]);
+
+  const statusCounts = useMemo(() => {
+    const base = tasks.filter((t) => t.recordType !== 'module');
+    const counts = {};
+    ALL_STATUSES.forEach((s) => {
+      counts[s] = base.filter((t) => t.status === s).length;
+    });
+    return counts;
+  }, [tasks]);
+
+  const toggleStatusChip = (statusVal) => {
+    setFilters((prev) => {
+      const cur = prev.statuses || [];
+      const next = cur.includes(statusVal)
+        ? cur.filter((s) => s !== statusVal)
+        : [...cur, statusVal];
+      return { ...prev, statuses: next };
+    });
+  };
+
+  const PRIORITY_BADGES = isDark ? PRIORITY_BADGES_DARK : PRIORITY_BADGES_LIGHT;
+
+  const resetNewTaskForm = () => {
+    setNewTask({
+      taskName: '',
+      taskId: '',
+      status: 'Upcoming',
+      developerId: '',
+      week: '',
+      phase: '',
+      priority: '',
+      module: '',
+      description: '',
+    });
+  };
+
+  const handleCreateTask = async () => {
+    if (!projectId || !newTask.taskName.trim()) {
+      showAlert('Task name is required', 'warning');
+      return;
+    }
+    setSavingTask(true);
+    try {
+      const created = await api.createTask(projectId, {
+        ...newTask,
+        taskName: newTask.taskName.trim(),
+        taskId: newTask.taskId.trim() || undefined,
+        developerId: newTask.developerId || null,
+        week: newTask.week || null,
+        phase: newTask.phase || null,
+        priority: newTask.priority || null,
+        module: newTask.module || null,
+        description: newTask.description || null,
+      });
+      setTasks((prev) => [...prev, created]);
+      if (created.week) {
+        const key = String(created.week).trim();
+        if (key) setCustomSprints((prev) => (prev.includes(key) ? prev : [...prev, key]));
+      }
+      setAddTaskOpen(false);
+      resetNewTaskForm();
+      showAlert('Task created successfully');
+    } catch (error) {
+      showAlert(error.response?.data?.error || 'Failed to create task', 'error');
+    } finally {
+      setSavingTask(false);
+    }
+  };
+
+  const goCalendar = () =>
+    navigate(
+      isClient ? `/client/${clientMeta?.token}/calendar` : `/projects/${projectId}/calendar`
+    );
 
   if (loading) {
     return (
@@ -393,842 +699,411 @@ export default function ProjectTaskBoard() {
     );
   }
 
+  if (loadError) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '80vh',
+          gap: 2,
+        }}
+      >
+        <Alert severity="error" sx={{ maxWidth: 480 }}>
+          Failed to load project data. Make sure the server is running and the database is
+          accessible.
+        </Alert>
+        <Button variant="contained" startIcon={<RefreshIcon />} onClick={loadData}>
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {/* Upper Navigation Tabs */}
-      <Paper variant="outlined" sx={{ borderRadius: 3, border: 'none', borderBottom: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
-        <Tabs
-          value={activeTab}
-          onChange={handleTabChange}
-          indicatorColor="primary"
-          textColor="primary"
-          variant="scrollable"
-          scrollButtons="auto"
+    <Box
+      sx={{
+        px: { xs: 2, sm: 3, md: 4 },
+        py: { xs: 2.5, md: 3 },
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        fontFamily: "'Inter', sans-serif",
+      }}
+    >
+      {isClient && (
+        <Paper
+          elevation={0}
           sx={{
-            px: 2,
-            '& .MuiTab-root': { fontWeight: 650, py: 2, fontSize: '0.88rem' }
+            p: { xs: 2, md: 2.25 },
+            borderRadius: '16px',
+            border: '1px solid',
+            borderColor: 'divider',
+            background: (t) =>
+              t.palette.mode === 'dark'
+                ? 'linear-gradient(135deg, #1e3a5f 0%, #111827 100%)'
+                : 'linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)',
           }}
         >
-          <Tab value="overview" label="Overview" />
-          {phaseList.map((phase) => (
-            <Tab key={phase} value={phase} label={phase} />
-          ))}
-          <Tab value="sprint-planner" label="Sprint Planner" />
-        </Tabs>
-      </Paper>
-
-      {/* OVERVIEW (EMBEDDED DASHBOARD VIEW) */}
-      {activeTab === 'overview' && (
-        <Dashboard />
-      )}
-
-      {/* SPRINT PLANNER & HIERARCHICAL PHASE VIEWS */}
-      {activeTab !== 'overview' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3.5 }}>
-          
-          {/* KPI Cards (Matches image layout) */}
-          <Grid container spacing={3}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ cursor: 'default', position: 'relative', overflow: 'hidden' }}>
-                <Box sx={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', bgcolor: 'primary.main' }} />
-                <CardContent sx={{ py: 2.5, px: 3 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Total Tasks
-                      </Typography>
-                      <Typography variant="h4" sx={{ fontWeight: 850, mt: 0.5 }}>
-                        {viewKPIs.total}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                        tasks in view
-                      </Typography>
-                    </Box>
-                    <Avatar sx={{ bgcolor: 'rgba(99, 102, 241, 0.1)', color: 'primary.main', width: 38, height: 38 }}>
-                      <AssignmentIcon fontSize="small" />
-                    </Avatar>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ cursor: 'default', position: 'relative', overflow: 'hidden' }}>
-                <Box sx={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', bgcolor: 'success.main' }} />
-                <CardContent sx={{ py: 2.5, px: 3 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Completed
-                      </Typography>
-                      <Typography variant="h4" sx={{ fontWeight: 850, mt: 0.5, color: 'success.main' }}>
-                        {viewKPIs.completed}
-                      </Typography>
-                      <Typography variant="caption" color="success.main" sx={{ fontWeight: 600, mt: 0.5, display: 'block' }}>
-                        {viewKPIs.completedPct}% of total
-                      </Typography>
-                    </Box>
-                    <Avatar sx={{ bgcolor: 'rgba(16, 185, 129, 0.1)', color: 'success.main', width: 38, height: 38 }}>
-                      <CheckCircleIcon fontSize="small" />
-                    </Avatar>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ cursor: 'default', position: 'relative', overflow: 'hidden' }}>
-                <Box sx={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', bgcolor: 'secondary.main' }} />
-                <CardContent sx={{ py: 2.5, px: 3 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        In Development
-                      </Typography>
-                      <Typography variant="h4" sx={{ fontWeight: 850, mt: 0.5, color: 'secondary.main' }}>
-                        {viewKPIs.inDev}
-                      </Typography>
-                      <Typography variant="caption" color="secondary.main" sx={{ fontWeight: 600, mt: 0.5, display: 'block' }}>
-                        {viewKPIs.inDevPct}% of total
-                      </Typography>
-                    </Box>
-                    <Avatar sx={{ bgcolor: 'rgba(59, 130, 246, 0.1)', color: 'secondary.main', width: 38, height: 38 }}>
-                      <CodeIcon fontSize="small" />
-                    </Avatar>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ cursor: 'default', position: 'relative', overflow: 'hidden' }}>
-                <Box sx={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', bgcolor: 'text.secondary' }} />
-                <CardContent sx={{ py: 2.5, px: 3 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Planned
-                      </Typography>
-                      <Typography variant="h4" sx={{ fontWeight: 850, mt: 0.5, color: 'text.secondary' }}>
-                        {viewKPIs.planned}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, mt: 0.5, display: 'block' }}>
-                        {viewKPIs.plannedPct}% of total
-                      </Typography>
-                    </Box>
-                    <Avatar sx={{ bgcolor: 'rgba(107, 114, 128, 0.1)', color: 'text.secondary', width: 38, height: 38 }}>
-                      <CalendarIcon fontSize="small" />
-                    </Avatar>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-
-          {/* Filtering Bar */}
-          <Paper variant="outlined" sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2, borderRadius: 3 }}>
-            <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap">
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Status Key
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            justifyContent="space-between"
+            alignItems={{ xs: 'flex-start', sm: 'center' }}
+            gap={1.25}
+          >
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+                {project?.name || clientProject?.name || 'Project'}
               </Typography>
-              
-              {ALL_STATUSES.map((statusVal) => {
-                const styles = getStatusStyle(statusVal);
-                const isActive = activeStatusFilters.includes(statusVal);
-                return (
-                  <Chip
-                    key={statusVal}
-                    label={styles.text}
-                    onClick={() => toggleStatusFilter(statusVal)}
-                    sx={{
-                      cursor: 'pointer',
-                      height: 26,
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      bgcolor: isActive ? styles.color : (theme => theme.palette.mode === 'dark' ? '#1f293730' : '#f8fafc'),
-                      color: isActive ? '#fff' : styles.color,
-                      border: `1px solid ${isActive ? 'transparent' : styles.color}35`,
-                      '&:hover': {
-                        bgcolor: isActive ? styles.color : 'action.hover',
-                      },
-                      transition: 'all 0.15s ease',
-                    }}
-                  />
-                );
-              })}
-
-              {activeStatusFilters.length > 0 && (
-                <Button size="small" color="inherit" onClick={() => setActiveStatusFilters([])}>
-                  Clear Keys
-                </Button>
-              )}
-            </Stack>
-
-            {/* Inline search filter */}
-            <TextField
-              placeholder="Search module or task..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                {[clientMeta?.clientName, clientMeta?.company].filter(Boolean).join(' · ') ||
+                  'Client view'}
+              </Typography>
+            </Box>
+            <Button
+              variant="outlined"
               size="small"
-              sx={{ width: { xs: '100%', sm: 220 } }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
-                  </InputAdornment>
-                ),
-                endAdornment: searchQuery && (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={() => setSearchQuery('')}>
-                      <ClearIcon fontSize="small" />
-                    </IconButton>
-                  </InputAdornment>
-                )
-              }}
-            />
-          </Paper>
-
-          {/* TABLE CONTAINER */}
-          <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
-            
-            {/* VIEW A: HIERARCHICAL PHASE VIEWS */}
-            {activeTab !== 'sprint-planner' && (
-              <Table size="small">
-                <TableHead sx={{ bgcolor: (theme) => theme.palette.mode === 'dark' ? '#1f2937' : '#0f172a' }}>
-                  <TableRow>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700, py: 1.5 }} width="40" />
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Phase</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Week</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Module ID</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Task ID</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }} width="280">Feature Name</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }} width="220">Description</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Status</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Developer</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Start</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Est. Done</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Priority</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Notes</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }} align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                
-                <TableBody>
-                  {hierarchicalData.map((group) => {
-                    const isExpanded = expandedParents[group.moduleId];
-                    const parentStatusStyle = getStatusStyle(group.status);
-                    
-                    return (
-                      <React.Fragment key={group.moduleId}>
-                        {/* Parent Row */}
-                        <TableRow 
-                          onClick={() => toggleParent(group.moduleId)}
-                          sx={{ 
-                            cursor: 'pointer',
-                            bgcolor: isDark ? '#1e293b40' : 'rgba(79, 70, 229, 0.03)',
-                            '&:hover': { bgcolor: isDark ? '#1e293b60' : 'rgba(79, 70, 229, 0.06)' },
-                          }}
-                        >
-                          <TableCell>
-                            <IconButton size="small" onClick={(e) => { e.stopPropagation(); toggleParent(group.moduleId); }}>
-                              {isExpanded ? <ExpandIcon fontSize="small" /> : <CollapseIcon fontSize="small" />}
-                            </IconButton>
-                          </TableCell>
-                          
-                          {/* Phase tag */}
-                          <TableCell>
-                            <Chip 
-                              label={group.phase || 'N/A'} 
-                              size="small" 
-                              sx={{ 
-                                bgcolor: isDark ? '#1e293b' : '#EFF6FF', 
-                                color: '#3B82F6', 
-                                fontWeight: 700,
-                                height: 22,
-                                fontSize: '0.72rem'
-                              }} 
-                            />
-                          </TableCell>
-                          
-                          {/* Week Tag */}
-                          <TableCell>
-                            <Chip 
-                              label={group.week || 'N/A'} 
-                              size="small" 
-                              sx={{ 
-                                bgcolor: '#FEF3C7', 
-                                color: '#D97706', 
-                                border: '1px solid #FDE047',
-                                fontWeight: 700,
-                                height: 22,
-                                fontSize: '0.72rem'
-                              }} 
-                            />
-                          </TableCell>
-                          
-                          {/* Module ID */}
-                          <TableCell sx={{ fontWeight: 750, color: 'primary.main' }}>
-                            {group.moduleId}
-                          </TableCell>
-
-                          {/* Task ID */}
-                          <TableCell sx={{ fontWeight: 650, color: 'text.secondary', fontSize: '0.82rem' }}>
-                            {group.parentTask?.taskId || '—'}
-                          </TableCell>
-                          
-                          {/* Feature Name & Progress Bar */}
-                          <TableCell>
-                            <Box sx={{ py: 0.5 }}>
-                              <Typography variant="body2" sx={{ fontWeight: 750 }}>
-                                {group.name || 'Access Management'}
-                              </Typography>
-                              
-                              {/* Completion Meter Progress */}
-                              <Stack direction="row" alignItems="center" gap={1} sx={{ mt: 0.5 }}>
-                                <Box sx={{ width: 80 }}>
-                                  <LinearProgress 
-                                    variant="determinate" 
-                                    value={group.completionPct} 
-                                    color="success" 
-                                    sx={{ height: 4, borderRadius: 2 }} 
-                                  />
-                                </Box>
-                                <Typography variant="caption" sx={{ fontSize: '0.68rem', color: 'text.secondary', fontWeight: 700 }}>
-                                  {group.completedTasks}/{group.totalTasks}
-                                </Typography>
-                              </Stack>
-                            </Box>
-                          </TableCell>
-                          
-                          {/* Description */}
-                          <TableCell>
-                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
-                              {group.description || group.name}
-                            </Typography>
-                          </TableCell>
-                          
-                          {/* Parent status chip */}
-                          <TableCell>
-                            <Chip
-                              label={parentStatusStyle.text}
-                              size="small"
-                              sx={{
-                                height: 24,
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                bgcolor: parentStatusStyle.bgcolor,
-                                color: parentStatusStyle.color,
-                                border: parentStatusStyle.border,
-                              }}
-                            />
-                          </TableCell>
-
-                          {/* Parent Developer assignment cell */}
-                          <TableCell>
-                            {group.parentTask ? (
-                              <Select
-                                value={group.parentTask.developerId || ''}
-                                onChange={(e) => handleDeveloperChange(group.parentTask.id, e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                                size="small"
-                                variant="standard"
-                                disableUnderline
-                                sx={{ fontSize: '0.8rem' }}
-                              >
-                                <MenuItem value="">
-                                  <Stack direction="row" alignItems="center" gap={1}>
-                                    <Avatar sx={{ width: 18, height: 18, fontSize: '0.6rem', bgcolor: 'grey.300' }}>?</Avatar>
-                                    <Typography variant="caption"><em>Unassigned</em></Typography>
-                                  </Stack>
-                                </MenuItem>
-                                {developers.map((dev) => (
-                                  <MenuItem key={dev.id} value={dev.id}>
-                                    <Stack direction="row" alignItems="center" gap={1}>
-                                      <Avatar sx={{ width: 18, height: 18, fontSize: '0.6rem', bgcolor: dev.color, fontWeight: 700 }}>
-                                        {getDevInitials(dev.name)}
-                                      </Avatar>
-                                      <Typography variant="caption" sx={{ fontWeight: 550 }}>{dev.name}</Typography>
-                                    </Stack>
-                                  </MenuItem>
-                                ))}
-                              </Select>
-                            ) : (
-                              <Typography variant="caption" color="text.secondary">—</Typography>
-                            )}
-                          </TableCell>
-
-                          <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>—</TableCell>
-                          <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>—</TableCell>
-                          
-                          {/* Priority */}
-                          <TableCell>
-                            {PRIORITY_BADGES[group.priority] ? (
-                              <Box sx={{ 
-                                display: 'inline-block',
-                                border: '1px solid',
-                                px: 1,
-                                py: 0.2,
-                                borderRadius: 1,
-                                fontSize: '0.72rem',
-                                fontWeight: 800,
-                                ...PRIORITY_BADGES[group.priority]
-                              }}>
-                                {group.priority}
-                              </Box>
-                            ) : '—'}
-                          </TableCell>
-                          
-                          {/* Notes */}
-                          <TableCell>
-                            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 120 }}>
-                              {group.notes || '—'}
-                            </Typography>
-                          </TableCell>
-
-                          {/* Actions */}
-                          <TableCell align="right">
-                            {group.parentTask && (
-                              <Tooltip title="Task Details">
-                                <IconButton 
-                                  size="small" 
-                                  onClick={(e) => { e.stopPropagation(); handleRowClick(group.parentTask); }}
-                                  sx={{ color: 'primary.main' }}
-                                >
-                                  <LaunchIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                          </TableCell>
-                        </TableRow>
-
-                        {/* Collapsed Children Sub-Tasks */}
-                        <TableRow>
-                          <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={14}>
-                            <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                              <Box sx={{ py: 1, pl: 4, pr: 1 }}>
-                                <Table size="small">
-                                  <TableBody>
-                                    {group.tasks.map((child, childIdx) => {
-                                      const childStatusStyle = getStatusStyle(child.status);
-                                      const hasPrio = PRIORITY_BADGES[child.priority];
-                                      
-                                      return (
-                                        <TableRow 
-                                          key={child.id}
-                                          onClick={() => handleRowClick(child)}
-                                          sx={{ 
-                                            cursor: 'pointer',
-                                            '&:hover': { bgcolor: 'action.hover', '& .row-actions': { opacity: 1 } },
-                                            '& td': { borderBottom: childIdx === group.tasks.length - 1 ? 'none' : '1px solid divider' }
-                                          }}
-                                        >
-                                          {/* Subtask indent arrow */}
-                                          <TableCell width="40" sx={{ pl: 4, color: 'text.secondary' }}>
-                                            ↳
-                                          </TableCell>
-                                          
-                                          {/* Phase */}
-                                          <TableCell width="85">
-                                            <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
-                                              {child.phase}
-                                            </Typography>
-                                          </TableCell>
-                                          
-                                          {/* Week */}
-                                          <TableCell width="70">
-                                            <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
-                                              {child.week}
-                                            </Typography>
-                                          </TableCell>
-                                          
-                                          {/* Module ID */}
-                                          <TableCell width="90" sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
-                                            {child.module}
-                                          </TableCell>
-
-                                          {/* Task ID */}
-                                          <TableCell sx={{ fontWeight: 650, color: 'text.secondary', fontSize: '0.8rem' }}>
-                                            {child.taskId}
-                                          </TableCell>
-                                          
-                                          {/* Title name */}
-                                          <TableCell width="280">
-                                            <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                                              {child.taskName}
-                                            </Typography>
-                                          </TableCell>
-                                          
-                                          {/* Description */}
-                                          <TableCell width="220">
-                                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
-                                              {child.description || '—'}
-                                            </Typography>
-                                          </TableCell>
-                                          
-                                          {/* Status inline editor dropdown */}
-                                          <TableCell width="150">
-                                            <Select
-                                              value={child.status}
-                                              onChange={(e) => handleStatusChange(child.id, e.target.value)}
-                                              onClick={(e) => e.stopPropagation()}
-                                              size="small"
-                                              variant="standard"
-                                              disableUnderline
-                                              sx={{ fontSize: '0.75rem' }}
-                                            >
-                                              {ALL_STATUSES.map((opt) => {
-                                                const optStyle = getStatusStyle(opt);
-                                                return (
-                                                  <MenuItem key={opt} value={opt}>
-                                                    <Chip
-                                                      label={optStyle.text}
-                                                      size="small"
-                                                      sx={{
-                                                        height: 22,
-                                                        fontSize: '0.68rem',
-                                                        fontWeight: 700,
-                                                        bgcolor: optStyle.bgcolor,
-                                                        color: optStyle.color,
-                                                        border: optStyle.border,
-                                                      }}
-                                                    />
-                                                  </MenuItem>
-                                                );
-                                              })}
-                                            </Select>
-                                          </TableCell>
-
-                                          {/* Developer dropdown */}
-                                          <TableCell>
-                                            <Select
-                                              value={child.developerId || ''}
-                                              onChange={(e) => handleDeveloperChange(child.id, e.target.value)}
-                                              onClick={(e) => e.stopPropagation()}
-                                              size="small"
-                                              variant="standard"
-                                              disableUnderline
-                                              sx={{ fontSize: '0.8rem' }}
-                                            >
-                                              <MenuItem value="">
-                                                <Stack direction="row" alignItems="center" gap={1}>
-                                                  <Avatar sx={{ width: 18, height: 18, fontSize: '0.6rem', bgcolor: 'grey.300' }}>?</Avatar>
-                                                  <Typography variant="caption"><em>Unassigned</em></Typography>
-                                                </Stack>
-                                              </MenuItem>
-                                              {developers.map((dev) => (
-                                                <MenuItem key={dev.id} value={dev.id}>
-                                                  <Stack direction="row" alignItems="center" gap={1}>
-                                                    <Avatar sx={{ width: 18, height: 18, fontSize: '0.6rem', bgcolor: dev.color, fontWeight: 700 }}>
-                                                      {getDevInitials(dev.name)}
-                                                    </Avatar>
-                                                    <Typography variant="caption" sx={{ fontWeight: 550 }}>{dev.name}</Typography>
-                                                  </Stack>
-                                                </MenuItem>
-                                              ))}
-                                            </Select>
-                                          </TableCell>
-                                          
-                                          {/* Dates */}
-                                          <TableCell width="95">
-                                            <Typography variant="caption" color="text.secondary">
-                                              {child.startDate || '—'}
-                                            </Typography>
-                                          </TableCell>
-                                          <TableCell width="95">
-                                            <Typography variant="caption" color="text.secondary">
-                                              {child.dueDate || '—'}
-                                            </Typography>
-                                          </TableCell>
-                                          
-                                          {/* Priority Box */}
-                                          <TableCell width="75">
-                                            {hasPrio ? (
-                                              <Box sx={{ 
-                                                display: 'inline-block',
-                                                border: '1px solid',
-                                                px: 0.8,
-                                                py: 0.1,
-                                                borderRadius: 0.8,
-                                                fontSize: '0.65rem',
-                                                fontWeight: 800,
-                                                ...hasPrio
-                                              }}>
-                                                {child.priority}
-                                              </Box>
-                                            ) : '—'}
-                                          </TableCell>
-                                          
-                                          {/* Notes */}
-                                          <TableCell>
-                                            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 120 }}>
-                                              {child.remarks || '—'}
-                                            </Typography>
-                                          </TableCell>
-
-                                          {/* Actions */}
-                                          <TableCell align="right">
-                                            <Box className="row-actions" sx={{ opacity: 0, transition: 'opacity 0.2s', display: 'flex', justifyContent: 'flex-end' }}>
-                                              <Tooltip title="Task Details">
-                                                <IconButton 
-                                                  size="small" 
-                                                  onClick={(e) => { e.stopPropagation(); handleRowClick(child); }}
-                                                  sx={{ color: 'primary.main' }}
-                                                >
-                                                  <LaunchIcon fontSize="small" />
-                                                </IconButton>
-                                              </Tooltip>
-                                            </Box>
-                                          </TableCell>
-                                        </TableRow>
-                                      );
-                                    })}
-                                  </TableBody>
-                                </Table>
-                              </Box>
-                            </Collapse>
-                          </TableCell>
-                        </TableRow>
-                      </React.Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-
-            {/* VIEW B: SPRINT PLANNER (WEEK GROUPED TABLE) */}
-            {activeTab === 'sprint-planner' && (
-              <Table size="small">
-                <TableHead sx={{ bgcolor: (theme) => theme.palette.mode === 'dark' ? '#1f2937' : '#0f172a' }}>
-                  <TableRow>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Week</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Module ID</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Task ID</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Phase</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }} width="300">Feature / Task</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Status</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Developer</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }} align="center">Est. Days</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Start Date</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>End Date</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Priority</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Dependencies</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Notes</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 700 }} align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-
-                <TableBody>
-                  {sprintPlannerWeeks.map((weekGroup) => (
-                    <React.Fragment key={weekGroup.weekId}>
-                      {/* Week Header Row Grouping */}
-                      <TableRow sx={{ bgcolor: isDark ? '#1f293780' : '#f8fafc', '& td': { py: 1.2, borderBottom: '1px solid divider' } }}>
-                        <TableCell colSpan={14}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'primary.main', pl: 1 }}>
-                            {`>> ${weekGroup.weekId === 'Unscheduled' ? 'UNSCHEDULED TASKS' : `${weekGroup.weekId.toUpperCase()} - ${weekGroup.tasks.length} tasks`}`}
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-
-                      {/* Tasks of Week */}
-                      {weekGroup.tasks.map((taskItem) => {
-                        const statusStyle = getStatusStyle(taskItem.status);
-                        const hasPrio = PRIORITY_BADGES[taskItem.priority];
-                        const isChild = taskItem.module && taskItem.module.includes('-');
-
-                        return (
-                          <TableRow
-                            key={taskItem.id}
-                            onClick={() => handleRowClick(taskItem)}
-                            className="row-actions-parent"
-                            sx={{
-                              cursor: 'pointer',
-                              '&:hover': { bgcolor: 'action.hover', '& .row-actions': { opacity: 1 } },
-                            }}
-                          >
-                            {/* Week */}
-                            <TableCell sx={{ fontWeight: 650, color: 'text.secondary', fontSize: '0.82rem' }}>
-                              {taskItem.week || '—'}
-                            </TableCell>
-
-                            {/* Module ID */}
-                            <TableCell sx={{ fontWeight: 700, color: 'primary.main', fontSize: '0.82rem' }}>
-                              {taskItem.module || '—'}
-                            </TableCell>
-
-                            {/* Task ID */}
-                            <TableCell sx={{ fontWeight: 650, color: 'text.secondary', fontSize: '0.82rem' }}>
-                              {taskItem.taskId || '—'}
-                            </TableCell>
-
-                            {/* Phase Tag */}
-                            <TableCell>
-                              {taskItem.phase ? (
-                                <Chip
-                                  label={taskItem.phase}
-                                  size="small"
-                                  sx={{
-                                    bgcolor: taskItem.phase.includes('Infra') ? '#FFF7ED' : '#EFF6FF',
-                                    color: taskItem.phase.includes('Infra') ? '#F97316' : '#3B82F6',
-                                    fontWeight: 700,
-                                    height: 20,
-                                    fontSize: '0.68rem',
-                                  }}
-                                />
-                              ) : '—'}
-                            </TableCell>
-
-                            {/* Feature / Task Title */}
-                            <TableCell>
-                              <Typography variant="body2" sx={{ fontWeight: isChild ? 500 : 700 }}>
-                                {`${isChild ? '↳ ' : ''}${taskItem.taskName}`}
-                              </Typography>
-                            </TableCell>
-
-                            {/* Status Select editor */}
-                            <TableCell>
-                              <Select
-                                value={taskItem.status}
-                                onChange={(e) => handleStatusChange(taskItem.id, e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                                size="small"
-                                variant="standard"
-                                disableUnderline
-                                sx={{ fontSize: '0.75rem' }}
-                              >
-                                {ALL_STATUSES.map((opt) => {
-                                  const optStyle = getStatusStyle(opt);
-                                  return (
-                                    <MenuItem key={opt} value={opt}>
-                                      <Chip
-                                        label={optStyle.text}
-                                        size="small"
-                                        sx={{
-                                          height: 22,
-                                          fontSize: '0.68rem',
-                                          fontWeight: 700,
-                                          bgcolor: optStyle.bgcolor,
-                                          color: optStyle.color,
-                                          border: optStyle.border,
-                                        }}
-                                      />
-                                    </MenuItem>
-                                  );
-                                })}
-                              </Select>
-                            </TableCell>
-
-                            {/* Developer assignment Select editor */}
-                            <TableCell>
-                              <Select
-                                value={taskItem.developerId || ''}
-                                onChange={(e) => handleDeveloperChange(taskItem.id, e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                                size="small"
-                                variant="standard"
-                                disableUnderline
-                                sx={{ fontSize: '0.8rem' }}
-                              >
-                                <MenuItem value="">
-                                  <Stack direction="row" alignItems="center" gap={1}>
-                                    <Avatar sx={{ width: 18, height: 18, fontSize: '0.6rem', bgcolor: 'grey.300' }}>?</Avatar>
-                                    <Typography variant="caption"><em>Unassigned</em></Typography>
-                                  </Stack>
-                                </MenuItem>
-                                {developers.map((dev) => (
-                                  <MenuItem key={dev.id} value={dev.id}>
-                                    <Stack direction="row" alignItems="center" gap={1}>
-                                      <Avatar sx={{ width: 18, height: 18, fontSize: '0.6rem', bgcolor: dev.color, fontWeight: 700 }}>
-                                        {getDevInitials(dev.name)}
-                                      </Avatar>
-                                      <Typography variant="caption" sx={{ fontWeight: 550 }}>{dev.name}</Typography>
-                                    </Stack>
-                                  </MenuItem>
-                                ))}
-                              </Select>
-                            </TableCell>
-
-                            {/* Est. Days */}
-                            <TableCell align="center" sx={{ fontWeight: 650, fontSize: '0.82rem' }}>
-                              {taskItem.estDays !== null && taskItem.estDays !== undefined ? taskItem.estDays : '—'}
-                            </TableCell>
-
-                            {/* Start Date */}
-                            <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
-                              {taskItem.startDate || '—'}
-                            </TableCell>
-
-                            {/* Due Date (End Date) */}
-                            <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
-                              {taskItem.dueDate || '—'}
-                            </TableCell>
-
-                            {/* Priority Badge */}
-                            <TableCell>
-                              {hasPrio ? (
-                                <Box sx={{
-                                  display: 'inline-block',
-                                  border: '1px solid',
-                                  px: 1,
-                                  py: 0.2,
-                                  borderRadius: 1,
-                                  fontSize: '0.7rem',
-                                  fontWeight: 800,
-                                  ...hasPrio
-                                }}>
-                                  {taskItem.priority}
-                                </Box>
-                              ) : '—'}
-                            </TableCell>
-
-                            {/* Dependencies */}
-                            <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
-                              {taskItem.dependencies || '—'}
-                            </TableCell>
-
-                            {/* Notes / Remarks */}
-                            <TableCell>
-                              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 150 }}>
-                                {taskItem.remarks || '—'}
-                              </Typography>
-                            </TableCell>
-
-                            {/* Actions */}
-                            <TableCell align="right">
-                              <Box className="row-actions" sx={{ opacity: 0, transition: 'opacity 0.2s', display: 'flex', justifyContent: 'flex-end' }}>
-                                <Tooltip title="Task Details">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(e) => { e.stopPropagation(); handleRowClick(taskItem); }}
-                                    sx={{ color: 'primary.main' }}
-                                  >
-                                    <LaunchIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </Box>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </React.Fragment>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-
-          </TableContainer>
-        </Box>
+              startIcon={<CalendarIcon />}
+              onClick={goCalendar}
+              sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '10px' }}
+            >
+              Calendar
+            </Button>
+          </Stack>
+        </Paper>
       )}
 
-      {/* Side Details Drawer */}
+      <TaskBoardToolbar
+        boardLayout={boardLayout}
+        onBoardLayoutChange={setBoardLayout}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        filters={{
+          ...filters,
+          developer: filters.developer === '' ? '' : String(filters.developer),
+        }}
+        onFilterChange={(key, value) => {
+          if (key === 'developer') {
+            handleFilterChange('developer', value === '' ? '' : value);
+          } else {
+            handleFilterChange(key, value);
+          }
+        }}
+        onClearFilters={clearFilters}
+        activeFilterCount={activeFilterCount}
+        filterOptions={filterOptions}
+        onCalendar={goCalendar}
+        onImportCsv={() => navigate(`/projects/upload?projectId=${projectId}`)}
+        onAddTask={() => setAddTaskOpen(true)}
+        onAddSprint={() => setAddSprintOpen(true)}
+        isClient={isClient}
+        statusCounts={statusCounts}
+        onStatusChipClick={toggleStatusChip}
+        activeStatusFilters={filters.statuses}
+        isDark={isDark}
+      />
+
+      {tasks.length === 0 ? (
+        <EmptyState
+          title="No tasks in this project"
+          description={
+            isClient
+              ? 'The shared project has no tasks yet. Check back once the admin imports or adds work items.'
+              : 'Upload a CSV or add tasks to start planning sprints and tracking progress.'
+          }
+          actionText={isClient ? undefined : 'Add Task'}
+          onActionClick={isClient ? undefined : () => setAddTaskOpen(true)}
+          actionPermission="task.edit"
+          actionIcon={<AddIcon />}
+        />
+      ) : filteredTasks.length === 0 ? (
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 4,
+            textAlign: 'center',
+            borderRadius: '16px',
+            borderStyle: 'dashed',
+          }}
+        >
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+            No matching tasks
+          </Typography>
+          <Typography sx={{ color: 'text.secondary', mb: 2 }}>
+            Try clearing filters or search to see more results.
+          </Typography>
+          <Button variant="outlined" onClick={clearFilters} sx={{ borderRadius: '10px' }}>
+            Clear filters
+          </Button>
+        </Paper>
+      ) : boardLayout === 'kanban' ? (
+        <KanbanBoard
+          tasks={filteredTasks}
+          developers={developers}
+          canStatus={canStatus}
+          canEdit={canEdit}
+          onStatusChange={(taskId, newStatus) => handleStatusChange(taskId, newStatus)}
+          onOpenTask={(task) => handleRowClick(task)}
+          onEditTask={canEdit ? (task) => handleRowClick(task, true) : undefined}
+          onAddTask={
+            canEdit
+              ? (status) => {
+                  setNewTask((prev) => ({
+                    ...prev,
+                    status: status || 'Upcoming',
+                  }));
+                  setAddTaskOpen(true);
+                }
+              : undefined
+          }
+        />
+      ) : (
+        <HierarchicalTaskTable
+          phaseTree={phaseTree}
+          developers={developers}
+          isDark={isDark}
+          canStatus={canStatus}
+          canAssign={canAssign}
+          canEdit={canEdit}
+          isClient={isClient}
+          priorityBadges={PRIORITY_BADGES}
+          expandedPhases={expandedPhases}
+          expandedModules={expandedModules}
+          onTogglePhase={(id) =>
+            setExpandedPhases((prev) => ({ ...prev, [id]: !(prev[id] !== false) }))
+          }
+          onToggleModule={(id) =>
+            setExpandedModules((prev) => ({ ...prev, [id]: !(prev[id] !== false) }))
+          }
+          onRowClick={handleRowClick}
+          onStatusChange={handleStatusChange}
+          onDeveloperChange={handleDeveloperChange}
+          onWeekChange={handleWeekChange}
+          availableSprints={availableSprintOptions}
+          normalizeWeekKey={normalizeWeekKey}
+          page={page}
+          rowsPerPage={rowsPerPage}
+          onPageChange={(_, newPage) => setPage(newPage)}
+          onRowsPerPageChange={(e) => {
+            setRowsPerPage(parseInt(e.target.value, 10));
+            setPage(0);
+          }}
+          totalCount={workTasks.length}
+        />
+      )}
+
+      {/* Status remark for Blocked / On Hold */}
+      <StatusRemarkDialog
+        open={statusRemark.open}
+        status={statusRemark.status}
+        taskName={statusRemark.taskName}
+        initialRemark={statusRemark.initialRemark}
+        saving={statusRemark.saving}
+        onCancel={handleStatusRemarkCancel}
+        onConfirm={handleStatusRemarkConfirm}
+      />
+
+      {/* Add Sprint Dialog */}
+      <Dialog open={addSprintOpen} onClose={() => setAddSprintOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 800 }}>Add Sprint</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+            Create a new sprint section. Then assign tasks using the Sprint column, import a CSV,
+            or add a single task.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Sprint name"
+            placeholder="e.g. W4 or Sprint 4"
+            value={newSprintName}
+            onChange={(e) => setNewSprintName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddSprint();
+            }}
+          />
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 2 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<UploadIcon />}
+              onClick={() => {
+                setAddSprintOpen(false);
+                navigate(`/projects/upload?projectId=${projectId}`);
+              }}
+            >
+              Import CSV
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={() => {
+                setAddSprintOpen(false);
+                setNewTask((prev) => ({ ...prev, week: newSprintName.trim() }));
+                setAddTaskOpen(true);
+              }}
+            >
+              Add single task
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setAddSprintOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleAddSprint} startIcon={<AddIcon />}>
+            Add Sprint
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Task Dialog */}
+      <Dialog
+        open={addTaskOpen}
+        onClose={() => {
+          if (!savingTask) {
+            setAddTaskOpen(false);
+            resetNewTaskForm();
+          }
+        }}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Add Task</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+            Create one task for this project. You can edit more details after saving.
+          </Typography>
+          <Stack spacing={2} sx={{ mt: 0.5 }}>
+            <TextField
+              label="Task name"
+              required
+              fullWidth
+              value={newTask.taskName}
+              onChange={(e) => setNewTask({ ...newTask, taskName: e.target.value })}
+              autoFocus
+            />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                label="Task ID"
+                fullWidth
+                value={newTask.taskId}
+                onChange={(e) => setNewTask({ ...newTask, taskId: e.target.value })}
+                placeholder="Auto if empty"
+                helperText="Optional"
+              />
+              <TextField
+                select
+                label="Status"
+                fullWidth
+                value={newTask.status}
+                onChange={(e) => setNewTask({ ...newTask, status: e.target.value })}
+              >
+                {ALL_STATUSES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                select
+                label="Sprint"
+                fullWidth
+                value={newTask.week}
+                onChange={(e) => setNewTask({ ...newTask, week: e.target.value })}
+              >
+                <MenuItem value="">Unscheduled</MenuItem>
+                {availableSprintOptions.map((opt) => (
+                  <MenuItem key={opt} value={opt}>
+                    {opt}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
+                label="Developer"
+                fullWidth
+                value={newTask.developerId}
+                onChange={(e) => setNewTask({ ...newTask, developerId: e.target.value })}
+              >
+                <MenuItem value="">Unassigned</MenuItem>
+                {developers.map((d) => (
+                  <MenuItem key={d.id} value={d.id}>
+                    {getDeveloperDisplayName(d)}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                label="Phase"
+                fullWidth
+                value={newTask.phase}
+                onChange={(e) => setNewTask({ ...newTask, phase: e.target.value })}
+              />
+              <TextField
+                label="Module"
+                fullWidth
+                value={newTask.module}
+                onChange={(e) => setNewTask({ ...newTask, module: e.target.value })}
+              />
+              <TextField
+                label="Priority"
+                fullWidth
+                value={newTask.priority}
+                onChange={(e) => setNewTask({ ...newTask, priority: e.target.value })}
+                placeholder="P0 / P1 / P2"
+              />
+            </Stack>
+            <TextField
+              label="Description"
+              fullWidth
+              multiline
+              rows={3}
+              value={newTask.description}
+              onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            disabled={savingTask}
+            onClick={() => {
+              setAddTaskOpen(false);
+              resetNewTaskForm();
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={savingTask || !newTask.taskName.trim()}
+            onClick={handleCreateTask}
+            startIcon={<AddIcon />}
+          >
+            {savingTask ? 'Saving…' : 'Create Task'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <TaskDetailsDrawer
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          setDrawerStartEdit(false);
+        }}
         task={selectedTask}
         developers={developers}
         onTaskUpdated={handleTaskUpdated}
+        startInEditMode={drawerStartEdit}
       />
 
-      {/* Alerts popup */}
       <Snackbar
         open={alert.open}
         autoHideDuration={4000}

@@ -15,6 +15,7 @@ import {
 import { FactCheck as LogoIcon, LockOutlined as LockIcon } from '@mui/icons-material';
 import api from '../services/api';
 import { useRole } from '../context/RoleContext';
+import { tokens } from '../theme';
 
 export default function LoginPage() {
   const theme = useTheme();
@@ -56,6 +57,8 @@ export default function LoginPage() {
     }
   };
 
+  const isDark = theme.palette.mode === 'dark';
+
   return (
     <Box
       sx={{
@@ -64,19 +67,31 @@ export default function LoginPage() {
         alignItems: 'center',
         justifyContent: 'center',
         px: 2,
-        background: theme.palette.mode === 'dark'
-          ? 'radial-gradient(circle at top, #1e1b4b 0%, #0f172a 55%)'
-          : 'radial-gradient(circle at top, #e0e7ff 0%, #f8fafc 55%)',
+        py: 4,
+        background: isDark
+          ? 'radial-gradient(ellipse at top, #1e1b4b 0%, #0B1220 60%)'
+          : 'radial-gradient(ellipse at top, #EEF2FF 0%, #F8FAFC 55%)',
       }}
     >
-      <Card sx={{ width: '100%', maxWidth: 420, borderRadius: '4px' }}>
-        <CardContent sx={{ p: 4 }}>
-          <Stack spacing={2} alignItems="center" sx={{ mb: 3 }}>
+      <Card
+        sx={{
+          width: '100%',
+          maxWidth: 440,
+          '&:hover': { transform: 'none', boxShadow: tokens.shadow.card },
+        }}
+      >
+        <CardContent sx={{ p: { xs: 3, sm: 4 }, '&:last-child': { pb: { xs: 3, sm: 4 } } }}>
+          <Stack
+            spacing={2.5}
+            sx={{
+              alignItems: "center",
+              mb: 3.5
+            }}>
             <Box
               sx={{
                 width: 56,
                 height: 56,
-                borderRadius: 3,
+                borderRadius: 2,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -84,26 +99,35 @@ export default function LoginPage() {
                 color: 'primary.contrastText',
               }}
             >
-              <LogoIcon />
+              <LogoIcon aria-hidden />
             </Box>
-            <Box textAlign="center">
-              <Typography variant="h5" sx={{ fontWeight: 800 }}>
+            <Box
+              sx={{
+                textAlign: "center",
+                px: 1
+              }}>
+              <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>
                 Super Admin Login
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography
+                variant="body2"
+                sx={{
+                  color: "text.secondary",
+                  lineHeight: 1.55
+                }}>
                 Sign in to manage projects, tasks, and client links
               </Typography>
             </Box>
           </Stack>
 
           {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
+            <Alert severity="error" sx={{ mb: 2.5 }} role="alert">
               {error}
             </Alert>
           )}
 
-          <Box component="form" onSubmit={handleSubmit}>
-            <Stack spacing={2}>
+          <Box component="form" onSubmit={handleSubmit} noValidate>
+            <Stack spacing={2.5}>
               <TextField
                 label="Username"
                 value={username}
@@ -112,6 +136,7 @@ export default function LoginPage() {
                 autoFocus
                 required
                 autoComplete="username"
+                size="medium"
               />
               <TextField
                 label="Password"
@@ -121,14 +146,16 @@ export default function LoginPage() {
                 fullWidth
                 required
                 autoComplete="current-password"
+                size="medium"
               />
               <Button
                 type="submit"
                 variant="contained"
                 size="large"
-                disabled={loading}
+                disabled={loading || !username.trim() || !password}
                 startIcon={loading ? <CircularProgress size={18} color="inherit" /> : <LockIcon />}
-                sx={{ py: 1.3, fontWeight: 700 }}
+                fullWidth
+                sx={{ mt: 0.5 }}
               >
                 {loading ? 'Signing in…' : 'Sign In'}
               </Button>

@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const projectController = require('../controllers/projectController');
+const { authMiddleware } = require('../middleware/auth');
 
 // Ensure uploads directory exists
 const uploadDir = path.join(__dirname, '../../uploads');
@@ -34,8 +35,8 @@ const upload = multer({
   }
 });
 
-router.get('/', projectController.getAllProjects);
-router.delete('/:id', projectController.deleteProject);
-router.post('/upload', upload.single('file'), projectController.uploadProject);
+router.get('/', authMiddleware, projectController.getAllProjects);
+router.delete('/:id', authMiddleware, projectController.deleteProject);
+router.post('/upload', authMiddleware, upload.single('file'), projectController.uploadProject);
 
 module.exports = router;

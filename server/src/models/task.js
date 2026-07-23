@@ -101,6 +101,31 @@ const Task = sequelize.define('Task', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  parentId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    field: 'parent_id',
+  },
+  recordType: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: 'task',
+    field: 'record_type',
+  },
+  tags: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  progressPercent: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    field: 'progress_percent',
+  },
+  customFields: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    field: 'custom_fields',
+  },
 }, {
   tableName: 'tasks',
 });

@@ -1,17 +1,30 @@
 /* Global Style Resets and Custom Scrollbars */
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  background-color: #F8FAFC;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Custom Scrollbars */
@@ -24,17 +37,125 @@ body {
   background: transparent;
 }
 
-/* Light Theme Scrollbars (overridden in JS but here as fallback) */
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1; /* Slate 300 */
+  background: #cbd5e1;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8; /* Slate 400 */
+  background: #94a3b8;
 }
 
-/* Transitions */
 .theme-transition {
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* PrimeReact inline calendar */
+.tt-prime-calendar .p-calendar {
+  width: 100%;
+}
+
+.tt-prime-calendar .p-datepicker {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.75rem;
+  font-family: inherit;
+}
+
+.tt-prime-calendar .p-datepicker table {
+  margin: 0.5rem 0 0;
+}
+
+.tt-prime-calendar .p-datepicker table td {
+  padding: 0.2rem;
+}
+
+.tt-prime-calendar .p-datepicker table td > span {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 8px;
+}
+
+.tt-prime-calendar .p-datepicker-header {
+  padding: 0.35rem 0 0.75rem;
+}
+
+.tt-prime-calendar.tt-prime-dark .p-datepicker {
+  background: #111827;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+.tt-prime-calendar.tt-prime-dark .p-datepicker th,
+.tt-prime-calendar.tt-prime-dark .p-datepicker td > span {
+  color: #e2e8f0;
+}
+
+.tt-prime-calendar.tt-prime-dark .p-datepicker-header {
+  background: #111827;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+/* FullCalendar */
+.tt-fullcalendar .fc {
+  --fc-border-color: #E5E7EB;
+  --fc-button-bg-color: #4F46E5;
+  --fc-button-border-color: #4F46E5;
+  --fc-button-hover-bg-color: #4338CA;
+  --fc-button-hover-border-color: #4338CA;
+  --fc-button-active-bg-color: #3730A3;
+  --fc-button-active-border-color: #3730A3;
+  --fc-today-bg-color: rgba(79, 70, 229, 0.08);
+}
+
+.tt-fullcalendar .fc .fc-toolbar {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.tt-fullcalendar .fc .fc-toolbar-title {
+  font-size: 1.15rem;
+}
+
+.tt-fullcalendar .fc .fc-button {
+  border-radius: 8px !important;
+  font-weight: 650;
+  text-transform: capitalize;
+  padding: 0.4rem 0.75rem !important;
+}
+
+.tt-fullcalendar .fc .fc-daygrid-day-number {
+  padding: 6px 8px;
+  font-weight: 650;
+}
+
+.tt-fc-dark .fc {
+  --fc-border-color: #334155;
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: #1e293b;
+  --fc-list-event-hover-bg-color: #1e293b;
+  --fc-today-bg-color: rgba(129, 140, 248, 0.12);
+  --fc-button-bg-color: #1e293b;
+  --fc-button-border-color: #475569;
+  --fc-button-hover-bg-color: #334155;
+  --fc-button-hover-border-color: #64748b;
+  color: #e2e8f0;
+}
+
+.tt-fc-dark .fc-col-header-cell-cushion,
+.tt-fc-dark .fc-daygrid-day-number {
+  color: #cbd5e1;
+}
+
+@media (max-width: 600px) {
+  .tt-fullcalendar .fc .fc-toolbar-title {
+    font-size: 1rem;
+  }
+
+  .tt-fullcalendar .fc .fc-button {
+    padding: 0.3rem 0.55rem !important;
+    font-size: 0.75rem !important;
+  }
 }

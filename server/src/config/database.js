@@ -1,13 +1,20 @@
 const { Sequelize } = require('sequelize');
-require('dotenv').config();
+require('./loadEnv');
 
 const dbHost = process.env.DB_HOST || 'localhost';
-const dbPort = process.env.DB_PORT || 3306;
+const dbPort = Number(process.env.DB_PORT) || 3306;
 const dbUser = process.env.DB_USER || 'root';
 const dbPass = process.env.DB_PASS || '';
 const dbName = process.env.DB_NAME || 'dev_task_tracker';
 
-// Function to ensure the database exists before connecting to it
+if (!process.env.DB_USER || process.env.DB_PASS === undefined) {
+  console.warn(
+    'DB credentials missing from env. Using defaults (user=%s). Check server/.env.',
+    dbUser
+  );
+}
+
+// Ensure the database exists before connecting (may fail on shared hosts without CREATE privilege)
 async function ensureDatabaseExists() {
   const mysql = require('mysql2/promise');
   try {
@@ -21,7 +28,10 @@ async function ensureDatabaseExists() {
     await connection.end();
     console.log(`Database '${dbName}' verified or created successfully.`);
   } catch (error) {
-    console.error('Error verifying/creating database:', error.message);
+    // Shared hosting often forbids CREATE DATABASE; continue if the DB already exists
+    console.warn(
+      `Could not verify/create database (continuing anyway): ${error.message}`
+    );
   }
 }
 
@@ -29,7 +39,7 @@ const sequelize = new Sequelize(dbName, dbUser, dbPass, {
   host: dbHost,
   port: dbPort,
   dialect: 'mysql',
-  logging: false, // Set to console.log for SQL query debugging
+  logging: false,
   pool: {
     max: 5,
     min: 0,
@@ -38,11 +48,12 @@ const sequelize = new Sequelize(dbName, dbUser, dbPass, {
   },
   define: {
     timestamps: true,
-    underscored: true, // Use snake_case for fields
+    underscored: true,
   },
 });
 
 module.exports = {
   sequelize,
   ensureDatabaseExists,
+  dbConfig: { host: dbHost, port: dbPort, user: dbUser, name: dbName },
 };
