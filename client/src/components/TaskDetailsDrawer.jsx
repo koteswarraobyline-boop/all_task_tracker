@@ -150,6 +150,9 @@ export default function TaskDetailsDrawer({ open, onClose, task, developers, onT
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Reset form when a *different* task is opened or drawer opens fresh.
+  // We intentionally exclude the full `task` object to avoid overwriting
+  // in-progress edits when the parent calls onTaskUpdated with the saved data.
   useEffect(() => {
     if (task) {
       setForm(buildFormFromTask(task));
@@ -160,12 +163,15 @@ export default function TaskDetailsDrawer({ open, onClose, task, developers, onT
       setForm(null);
       setEditing(false);
     }
-  }, [task, open, startInEditMode, canModify]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, open, startInEditMode, canModify]);
 
   const display = useMemo(() => {
-    if (!task) return { title: '', description: '' };
-    return splitTitleAndDescription(task.taskName, task.description);
-  }, [task]);
+    // Use form state (which is updated immediately after save) so the
+    // view-mode reflects the saved values before the parent re-renders.
+    if (!form) return { title: '', description: '' };
+    return { title: form.taskName || '', description: form.description || '' };
+  }, [form]);
 
   if (!task || !form) return null;
 
@@ -224,10 +230,15 @@ export default function TaskDetailsDrawer({ open, onClose, task, developers, onT
       };
 
       const updated = await api.updateTask(task.id, payload);
-      onTaskUpdated(updated);
-      setForm(buildFormFromTask(updated));
+      // Update form with the fresh server response BEFORE calling onTaskUpdated
+      // so the view-mode shows correct saved values immediately
+      const freshForm = buildFormFromTask(updated);
+      setForm(freshForm);
       setEditing(false);
       setSuccessMsg('Changes saved');
+      // Notify parent last — this changes the task prop but our effect
+      // only watches task?.id so it won't overwrite the fresh form
+      onTaskUpdated(updated);
     } catch (err) {
       console.error('Failed to save task:', err);
       setError(err.response?.data?.error || 'Failed to save changes');

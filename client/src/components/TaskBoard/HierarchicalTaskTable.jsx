@@ -208,12 +208,12 @@ export default function HierarchicalTaskTable({
               <TableCell sx={{ ...headCellSx, minWidth: 280 }}>Task & Module</TableCell>
               <TableCell sx={headCellSx}>Task ID</TableCell>
               <TableCell sx={headCellSx}>Status</TableCell>
-              <TableCell sx={headCellSx}>Developer</TableCell>
+              {!isClient && <TableCell sx={headCellSx}>Developer</TableCell>}
               <TableCell sx={headCellSx}>Start Date</TableCell>
               <TableCell sx={headCellSx}>End Date</TableCell>
               <TableCell sx={headCellSx}>Priority</TableCell>
               <TableCell sx={headCellSx}>Progress</TableCell>
-              <TableCell sx={headCellSx}>Sprint</TableCell>
+              {!isClient && <TableCell sx={headCellSx}>Sprint</TableCell>}
               {!isClient && (
                 <TableCell sx={{ ...headCellSx, width: 56 }} align="center">
                   Actions
@@ -224,7 +224,7 @@ export default function HierarchicalTaskTable({
           <TableBody>
             {phaseTree.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} sx={{ py: 6, textAlign: 'center' }}>
+                <TableCell colSpan={isClient ? 7 : 10} sx={{ py: 6, textAlign: 'center' }}>
                   <Typography color="text.secondary" fontWeight={600}>
                     No phases or modules match your filters
                   </Typography>
@@ -253,7 +253,7 @@ export default function HierarchicalTaskTable({
                         transition: 'background 0.15s ease',
                       }}
                     >
-                      <TableCell colSpan={7} sx={{ pl: 1.5 }}>
+                      <TableCell colSpan={isClient ? 6 : 7} sx={{ pl: 1.5 }}>
                         <Stack direction="row" spacing={1.25} alignItems="center">
                           <Box
                             sx={{
@@ -295,7 +295,7 @@ export default function HierarchicalTaskTable({
                                   color: accent,
                                 }}
                               />
-                              {phase.developerCount > 0 && (
+                              {!isClient && phase.developerCount > 0 && (
                                 <Chip
                                   label={`${phase.developerCount} devs`}
                                   size="small"
@@ -350,7 +350,7 @@ export default function HierarchicalTaskTable({
                                 },
                               }}
                             >
-                              <TableCell colSpan={7} sx={{ pl: 5 }}>
+                              <TableCell colSpan={isClient ? 6 : 7} sx={{ pl: 5 }}>
                                 <Stack direction="row" spacing={1} alignItems="center">
                                   <IconButton size="small" sx={{ p: 0.25 }}>
                                     {modOpen ? (
@@ -399,7 +399,7 @@ export default function HierarchicalTaskTable({
                                     >
                                       Progress {mod.completionPct}% · {mod.completedTasks} /{' '}
                                       {mod.taskCount} Completed
-                                      {mod.ownerName ? ` · ${mod.ownerName}` : ''}
+                                      {!isClient && mod.ownerName ? ` · ${mod.ownerName}` : ''}
                                     </Typography>
                                   </Box>
                                 </Stack>
@@ -485,6 +485,7 @@ export default function HierarchicalTaskTable({
                                         canEdit={canStatus}
                                       />
                                     </TableCell>
+                                    {!isClient && (
                                     <TableCell onClick={(e) => e.stopPropagation()}>
                                       <InlineDeveloperSelect
                                         value={task.developerId}
@@ -495,6 +496,7 @@ export default function HierarchicalTaskTable({
                                         canEdit={canAssign}
                                       />
                                     </TableCell>
+                                    )}
                                     <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
                                       {task.startDate || '—'}
                                     </TableCell>
@@ -510,6 +512,7 @@ export default function HierarchicalTaskTable({
                                     <TableCell>
                                       <ProgressCell task={task} width={72} />
                                     </TableCell>
+                                    {!isClient && (
                                     <TableCell onClick={(e) => e.stopPropagation()}>
                                       {canEdit ? (
                                         <Select
@@ -549,6 +552,7 @@ export default function HierarchicalTaskTable({
                                         </Typography>
                                       )}
                                     </TableCell>
+                                    )}
                                     <TableCell
                                       align="center"
                                       onClick={(e) => e.stopPropagation()}

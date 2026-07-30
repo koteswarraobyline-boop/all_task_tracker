@@ -75,6 +75,11 @@ export const api = {
     return response.data;
   },
 
+  updateProjectDeliveryDate: async (id, data) => {
+    const response = await apiClient.put(`/projects/${id}/delivery-date`, data);
+    return response.data;
+  },
+
   // Tasks
   getProjectTasks: async (projectId, params = {}) => {
     const response = await apiClient.get(`/projects/${projectId}/tasks`, { params });

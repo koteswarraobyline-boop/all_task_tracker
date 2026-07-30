@@ -884,6 +884,7 @@ export default function ProjectTaskTimeline() {
                 tasks={filteredTasks}
                 developers={developers}
                 readonly={!canEdit || isClient}
+                hideAssignee={isClient}
                 dark={isDark}
                 height={isMobile ? 520 : 680}
                 groupBy={groupBy}

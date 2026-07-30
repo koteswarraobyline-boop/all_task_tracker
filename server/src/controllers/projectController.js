@@ -144,6 +144,23 @@ exports.getAllProjects = async (req, res) => {
         modules.find((t) => t.description)?.description ||
         null;
 
+      const originalDeliveryDate = proj.originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
+      const revisedDeliveryDate = proj.revisedDeliveryDate || null;
+      const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
+
+      let projectOverdueDays = 0;
+      let isProjectOverdue = false;
+      const isProjectExtended = Boolean(proj.revisedDeliveryDate);
+
+      if (effectiveDueDate && status !== 'Completed') {
+        const targetTime = new Date(effectiveDueDate).getTime();
+        const nowTime = new Date().setHours(0, 0, 0, 0);
+        if (!isNaN(targetTime) && targetTime < nowTime) {
+          projectOverdueDays = Math.ceil((nowTime - targetTime) / (1000 * 60 * 60 * 24));
+          isProjectOverdue = true;
+        }
+      }
+
       return {
         id: proj.id,
         name: proj.name,
@@ -166,7 +183,14 @@ exports.getAllProjects = async (req, res) => {
         lastUpdated,
         createdAt: proj.createdAt,
         startDate,
-        dueDate,
+        dueDate: effectiveDueDate,
+        originalDeliveryDate,
+        revisedDeliveryDate,
+        effectiveDueDate,
+        deliveryNotes: proj.deliveryNotes || null,
+        projectOverdueDays,
+        isProjectOverdue,
+        isProjectExtended,
         members,
         status,
         archived,
@@ -489,6 +513,40 @@ exports.uploadProject = async (req, res) => {
     })
     .on('error', (csvError) => {
       console.error('CSV stream parsing error:', csvError);
-      res.status(500).json({ error: 'Failed to read CSV file' });
+        res.status(500).json({ error: 'Failed to read CSV file' });
     });
+};
+
+// PUT /projects/:id/delivery-date
+exports.updateProjectDeliveryDate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { originalDeliveryDate, revisedDeliveryDate, deliveryNotes } = req.body;
+
+    const project = await Project.findByPk(id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const updates = {};
+    if (originalDeliveryDate !== undefined) updates.originalDeliveryDate = originalDeliveryDate || null;
+    if (revisedDeliveryDate !== undefined) updates.revisedDeliveryDate = revisedDeliveryDate || null;
+    if (deliveryNotes !== undefined) updates.deliveryNotes = deliveryNotes || null;
+
+    await project.update(updates);
+
+    res.json({
+      message: 'Project delivery date updated successfully',
+      project: {
+        id: project.id,
+        name: project.name,
+        originalDeliveryDate: project.originalDeliveryDate,
+        revisedDeliveryDate: project.revisedDeliveryDate,
+        deliveryNotes: project.deliveryNotes,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating project delivery date:', error);
+    res.status(500).json({ error: 'Failed to update project delivery date' });
+  }
 };

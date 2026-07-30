@@ -18,7 +18,6 @@ import Layout from '../components/Layout';
 import ClientOverview from './ClientOverview';
 import ProjectTaskBoard from './ProjectTaskBoard';
 import ProjectTaskCalendar from './ProjectTaskCalendar';
-import ProjectTaskTimeline from './ProjectTaskTimeline';
 import LinkExpiredPage from './LinkExpiredPage';
 import LinkDisabledPage from './LinkDisabledPage';
 import LinkNotFoundPage from './LinkNotFoundPage';
@@ -150,7 +149,6 @@ export default function ClientShell({ mode, toggleMode }) {
         <Route path="overview" element={<ClientOverview />} />
         <Route path="tasks" element={<ProjectTaskBoard />} />
         <Route path="calendar" element={<ProjectTaskCalendar />} />
-        <Route path="timeline" element={<ProjectTaskTimeline />} />
         <Route path="*" element={<Navigate to="overview" replace />} />
       </Routes>
     </Layout>

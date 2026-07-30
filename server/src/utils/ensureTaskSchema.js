@@ -12,6 +12,13 @@ async function ensureTaskSchema() {
     { name: 'custom_fields', sql: "ADD COLUMN `custom_fields` TEXT NULL" },
   ];
 
+  const projectAlters = [
+    { name: 'original_delivery_date', sql: "ADD COLUMN `original_delivery_date` VARCHAR(32) NULL" },
+    { name: 'revised_delivery_date', sql: "ADD COLUMN `revised_delivery_date` VARCHAR(32) NULL" },
+    { name: 'target_delivery_date', sql: "ADD COLUMN `target_delivery_date` VARCHAR(32) NULL" },
+    { name: 'delivery_notes', sql: "ADD COLUMN `delivery_notes` TEXT NULL" },
+  ];
+
   for (const { name, sql } of alters) {
     try {
       await sequelize.query(`ALTER TABLE \`tasks\` ${sql}`);
@@ -22,10 +29,25 @@ async function ensureTaskSchema() {
         continue;
       }
       if (/unknown table|doesn't exist/i.test(msg)) {
-        // Table not created yet — sequelize.sync will create full schema
         continue;
       }
       console.warn(`Could not add tasks.${name}: ${msg}`);
+    }
+  }
+
+  for (const { name, sql } of projectAlters) {
+    try {
+      await sequelize.query(`ALTER TABLE \`projects\` ${sql}`);
+      console.log(`Added projects.${name} column`);
+    } catch (err) {
+      const msg = String(err.message || '');
+      if (/duplicate column|already exists/i.test(msg)) {
+        continue;
+      }
+      if (/unknown table|doesn't exist/i.test(msg)) {
+        continue;
+      }
+      console.warn(`Could not add projects.${name}: ${msg}`);
     }
   }
 }

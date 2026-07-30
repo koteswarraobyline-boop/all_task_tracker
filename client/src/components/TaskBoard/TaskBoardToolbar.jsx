@@ -88,15 +88,17 @@ export default function TaskBoardToolbar({
           flexWrap="wrap"
           justifyContent={{ xs: 'flex-start', md: 'flex-end' }}
         >
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<CalendarIcon />}
-            onClick={onCalendar}
-            sx={actionBtnSx}
-          >
-            Calendar
-          </Button>
+          {!isClient && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<CalendarIcon />}
+              onClick={onCalendar}
+              sx={actionBtnSx}
+            >
+              Calendar
+            </Button>
+          )}
           {!isClient && (
             <Can permission="task.edit">
               <Button
@@ -198,16 +200,18 @@ export default function TaskBoardToolbar({
             allLabel="Select All"
             minWidth={120}
           />
-          <FilterDropdown
-            label="Developer"
-            icon={<DevIcon sx={{ fontSize: 16 }} />}
-            options={filterOptions.developers}
-            value={filters.developer}
-            onChange={(v) => onFilterChange('developer', v)}
-            searchable
-            searchPlaceholder="Search developer..."
-            minWidth={130}
-          />
+          {!isClient && (
+            <FilterDropdown
+              label="Developer"
+              icon={<DevIcon sx={{ fontSize: 16 }} />}
+              options={filterOptions.developers}
+              value={filters.developer}
+              onChange={(v) => onFilterChange('developer', v)}
+              searchable
+              searchPlaceholder="Search developer..."
+              minWidth={130}
+            />
+          )}
           <FilterDropdown
             label="Priority"
             icon={<PriorityIcon sx={{ fontSize: 16 }} />}

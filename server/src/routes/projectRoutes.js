@@ -37,6 +37,7 @@ const upload = multer({
 
 router.get('/', authMiddleware, projectController.getAllProjects);
 router.delete('/:id', authMiddleware, projectController.deleteProject);
+router.put('/:id/delivery-date', authMiddleware, projectController.updateProjectDeliveryDate);
 router.post('/upload', authMiddleware, upload.single('file'), projectController.uploadProject);
 
 module.exports = router;

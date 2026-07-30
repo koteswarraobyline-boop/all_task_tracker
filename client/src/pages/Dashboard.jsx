@@ -69,6 +69,7 @@ import {
 import api from '../services/api';
 import PageContainer, { MetricCard } from '../components/PageContainer';
 import ShareProjectDialog from '../components/ShareProjectDialog';
+import UpdateDeliveryDateDialog from '../components/UpdateDeliveryDateDialog';
 import OverviewProjectTimeline from '../components/OverviewProjectTimeline';
 import Can from '../components/Can';
 import { tokens } from '../theme';
@@ -238,6 +239,7 @@ export default function Dashboard() {
   const [developers, setDevelopers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [shareOpen, setShareOpen] = useState(false);
+  const [dateDialogOpen, setDateDialogOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [favorite, setFavorite] = useState(false);
   const [recentTasksPage, setRecentTasksPage] = useState(0);
@@ -1349,30 +1351,75 @@ export default function Dashboard() {
             </SectionCard>
 
             <Stack spacing={3}>
-              <SectionCard title="Project Information">
+              <SectionCard
+                title="Project Information"
+                action={
+                  !isClient && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<CalendarIcon />}
+                      onClick={() => setDateDialogOpen(true)}
+                    >
+                      Update Date & Note
+                    </Button>
+                  )
+                }
+              >
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
                   {[
                     ['Client', project?.clientName || '—'],
                     ['Manager', project?.manager?.name || '—'],
                     ['Created', formatShortDate(project?.createdAt)],
                     ['Updated', timeAgo(project?.lastUpdated) || '—'],
-                    ['Start', formatShortDate(project?.startDate)],
-                    ['Due', formatShortDate(project?.dueDate)],
+                    ['Start Date', formatShortDate(project?.startDate)],
+                    ['Original Delivery', formatShortDate(project?.originalDeliveryDate || project?.dueDate)],
+                    ['Revised Date', project?.revisedDeliveryDate ? formatShortDate(project.revisedDeliveryDate) : '—'],
+                    [
+                      'Project Status',
+                      project?.isProjectOverdue ? (
+                        <Chip
+                          icon={<OverdueIcon sx={{ fontSize: '13px !important', color: '#DC2626 !important' }} />}
+                          label={`${project.projectOverdueDays}d Overdue`}
+                          size="small"
+                          sx={{ bgcolor: '#FEF2F2', color: '#B91C1C', fontWeight: 800, height: 20, fontSize: '0.7rem' }}
+                        />
+                      ) : (
+                        <Chip
+                          label="On Track"
+                          size="small"
+                          sx={{ bgcolor: '#F0FDF4', color: '#15803D', fontWeight: 700, height: 20, fontSize: '0.7rem' }}
+                        />
+                      ),
+                    ],
                     ['Est. Hours', `${metrics.estimated || 0}h`],
                     ['Actual Hours', `${metrics.actual || 0}h`],
-                    ['Phase', nextMilestone?.name || '—'],
-                    ['Release', tags[0] || '—'],
                   ].map(([label, value]) => (
                     <Box key={label}>
                       <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', mb: 0.35 }}>
                         {label.toUpperCase()}
                       </Typography>
-                      <Typography sx={{ fontSize: '0.85rem', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {value}
-                      </Typography>
+                      {typeof value === 'string' || typeof value === 'number' ? (
+                        <Typography sx={{ fontSize: '0.85rem', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {value}
+                        </Typography>
+                      ) : (
+                        value
+                      )}
                     </Box>
                   ))}
                 </Box>
+                {project?.deliveryNotes && (
+                  <>
+                    <Divider sx={{ my: 1.5 }} />
+                    <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: 'text.secondary', mb: 0.5 }}>
+                      REVISION / EXTENSION NOTE
+                    </Typography>
+                    <Typography sx={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'text.primary', bgcolor: 'action.hover', p: 1.25, borderRadius: 1.5 }}>
+                      &ldquo;{project.deliveryNotes}&rdquo;
+                    </Typography>
+                  </>
+                )}
                 {tags.length > 0 && (
                   <>
                     <Divider sx={{ my: 2 }} />
@@ -1622,6 +1669,12 @@ export default function Dashboard() {
         </MenuItem>
       </Menu>
       <ShareProjectDialog open={shareOpen} onClose={() => setShareOpen(false)} project={project} />
+      <UpdateDeliveryDateDialog
+        open={dateDialogOpen}
+        onClose={() => setDateDialogOpen(false)}
+        project={project}
+        onUpdated={load}
+      />
     </PageContainer>
   );
 }

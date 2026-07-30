@@ -55,6 +55,7 @@ export default function OverviewProjectTimeline({
   projectName = '',
   loading = false,
   readonly = true,
+  hideAssignee = false,
   dark,
   onOpenFull,
   onTaskClick,
@@ -336,6 +337,7 @@ export default function OverviewProjectTimeline({
             tasks={filtered}
             developers={developers}
             readonly={readonly}
+            hideAssignee={hideAssignee}
             dark={isDark}
             compact
             onTaskClick={onTaskClick}

@@ -67,8 +67,10 @@ import {
 } from '@mui/icons-material';
 import api from '../services/api';
 import EmptyState from '../components/EmptyState';
-import Can from '../components/Can';
+import { openClientInviteEmail } from '../utils/clientInviteMail';
 import ShareProjectDialog from '../components/ShareProjectDialog';
+import UpdateDeliveryDateDialog from '../components/UpdateDeliveryDateDialog';
+import Can from '../components/Can';
 import PageContainer, { MetricCard } from '../components/PageContainer';
 import { tokens } from '../theme';
 
@@ -479,10 +481,47 @@ function ProjectCard({
             </Stack>
           </Box>
           <Box sx={{ textAlign: 'right' }}>
-            <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, fontWeight: 600 }}>
-              Due
+            <Typography
+              sx={{
+                fontSize: '0.7rem',
+                color: proj.isProjectOverdue ? '#DC2626' : 'text.secondary',
+                mb: 0.3,
+                fontWeight: 750,
+                letterSpacing: '0.02em',
+              }}
+            >
+              {proj.isProjectOverdue ? `OVERDUE (${proj.projectOverdueDays}d)` : 'DUE'}
             </Typography>
-            <Typography sx={{ fontSize: '0.8rem', fontWeight: 650 }}>{formatDate(proj.dueDate)}</Typography>
+            {proj.isProjectOverdue ? (
+              <Chip
+                icon={<OverdueIcon sx={{ fontSize: '12px !important', color: '#DC2626 !important' }} />}
+                label={formatDate(proj.effectiveDueDate || proj.revisedDeliveryDate || proj.dueDate)}
+                size="small"
+                sx={{
+                  bgcolor: '#FEF2F2',
+                  color: '#B91C1C',
+                  fontWeight: 800,
+                  border: '1px solid #FCA5A5',
+                  height: 22,
+                  fontSize: '0.75rem',
+                }}
+              />
+            ) : (
+              <Typography
+                sx={{
+                  fontSize: '0.825rem',
+                  fontWeight: 750,
+                  color: proj.revisedDeliveryDate ? '#6B21A8' : 'text.primary',
+                }}
+              >
+                {formatDate(proj.effectiveDueDate || proj.revisedDeliveryDate || proj.dueDate)}
+              </Typography>
+            )}
+            {proj.revisedDeliveryDate && !proj.isProjectOverdue && (
+              <Typography sx={{ fontSize: '0.65rem', color: '#6B21A8', fontWeight: 750, mt: 0.2 }}>
+                Extended Date
+              </Typography>
+            )}
           </Box>
         </Stack>
       </Box>
@@ -581,6 +620,7 @@ export default function Projects() {
   const [rowsPerPage, setRowsPerPage] = useState(12);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuProj, setMenuProj] = useState(null);
+  const [dateDialogProj, setDateDialogProj] = useState(null);
   const [sortAnchor, setSortAnchor] = useState(null);
   const [moreAnchor, setMoreAnchor] = useState(null);
   const [recentSearches, setRecentSearches] = useState(() => {
@@ -1422,7 +1462,23 @@ export default function Projects() {
                               </Typography>
                             </TableCell>
                             <TableCell>
-                              <Typography sx={{ fontSize: '0.85rem' }}>{formatDate(proj.dueDate)}</Typography>
+                              {proj.isProjectOverdue ? (
+                                <Chip
+                                  icon={<OverdueIcon sx={{ fontSize: '13px !important', color: '#DC2626 !important' }} />}
+                                  label={`${formatDate(proj.dueDate)} (${proj.projectOverdueDays}d overdue)`}
+                                  size="small"
+                                  sx={{ bgcolor: '#FEF2F2', color: '#B91C1C', fontWeight: 800, border: '1px solid #FCA5A5' }}
+                                />
+                              ) : proj.revisedDeliveryDate ? (
+                                <Stack direction="row" alignItems="center" spacing={0.5}>
+                                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#6B21A8' }}>
+                                    {formatDate(proj.dueDate)}
+                                  </Typography>
+                                  <Chip label="Extended" size="small" sx={{ bgcolor: '#F3E8FF', color: '#6B21A8', height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
+                                </Stack>
+                              ) : (
+                                <Typography sx={{ fontSize: '0.85rem', fontWeight: 650 }}>{formatDate(proj.dueDate)}</Typography>
+                              )}
                             </TableCell>
                             <TableCell>
                               <Typography sx={{ fontSize: '0.85rem', fontWeight: 650 }}>
@@ -1711,6 +1767,14 @@ export default function Projects() {
         >
           <DashboardIcon fontSize="small" sx={{ mr: 1.5 }} /> Dashboard
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setDateDialogProj(menuProj);
+            setMenuAnchor(null);
+          }}
+        >
+          <CalendarIcon fontSize="small" sx={{ mr: 1.5 }} /> Update Delivery Date
+        </MenuItem>
         <Can permission="project.share">
           <MenuItem
             onClick={() => {
@@ -1719,16 +1783,6 @@ export default function Projects() {
             }}
           >
             <ShareIcon fontSize="small" sx={{ mr: 1.5 }} /> Share
-          </MenuItem>
-        </Can>
-        <Can permission="csv.upload">
-          <MenuItem
-            onClick={() => {
-              navigate(`/projects/upload?projectId=${menuProj?.id}`);
-              setMenuAnchor(null);
-            }}
-          >
-            <EditIcon fontSize="small" sx={{ mr: 1.5 }} /> Import / Update
           </MenuItem>
         </Can>
         <Can permission="csv.upload">
@@ -1751,6 +1805,12 @@ export default function Projects() {
         open={Boolean(shareProj)}
         onClose={() => setShareProj(null)}
         project={shareProj}
+      />
+      <UpdateDeliveryDateDialog
+        open={Boolean(dateDialogProj)}
+        onClose={() => setDateDialogProj(null)}
+        project={dateDialogProj}
+        onUpdated={fetchProjects}
       />
       <Dialog open={openDelete} onClose={handleCloseDelete} fullWidth maxWidth="xs">
         <DialogTitle>Delete Project?</DialogTitle>

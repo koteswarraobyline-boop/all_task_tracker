@@ -32,11 +32,11 @@ import {
 } from '@mui/icons-material';
 import api from '../services/api';
 import PageContainer from '../components/PageContainer';
-import OverviewProjectTimeline from '../components/OverviewProjectTimeline';
 import { tokens } from '../theme';
 import { useRole } from '../context/RoleContext';
 import { splitTitleAndDescription } from '../components/TaskDetailsDrawer';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
+import { getTaskProgressPercent } from '../utils/taskProgress';
 import { initials, formatDate, timeAgo } from '../utils/formatters';
 
 const ACCENT = '#3B82F6';
@@ -143,7 +143,6 @@ export default function ClientOverview() {
   const [recentTasksRowsPerPage, setRecentTasksRowsPerPage] = useState(8);
 
   const tasksPath = `/client/${token}/tasks`;
-  const timelinePath = `/client/${token}/timeline`;
 
   useEffect(() => {
     const load = async () => {
@@ -211,6 +210,35 @@ export default function ClientOverview() {
     };
   }, [tasks, today]);
 
+  const projectDateMetrics = useMemo(() => {
+    const originalDeliveryDate = project?.originalDeliveryDate || metrics.dueDate;
+    const revisedDeliveryDate = project?.revisedDeliveryDate || null;
+    const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate;
+
+    let isProjectOverdue = false;
+    let projectOverdueDays = 0;
+    const isExtended = Boolean(revisedDeliveryDate);
+
+    if (effectiveDueDate && metrics.completed < metrics.total) {
+      const dueTime = new Date(effectiveDueDate).setHours(0, 0, 0, 0);
+      const nowTime = today.getTime();
+      if (!isNaN(dueTime) && dueTime < nowTime) {
+        isProjectOverdue = true;
+        projectOverdueDays = Math.ceil((nowTime - dueTime) / (1000 * 60 * 60 * 24));
+      }
+    }
+
+    return {
+      originalDeliveryDate,
+      revisedDeliveryDate,
+      effectiveDueDate,
+      deliveryNotes: project?.deliveryNotes || null,
+      isProjectOverdue,
+      projectOverdueDays,
+      isExtended,
+    };
+  }, [project, metrics, today]);
+
   const milestones = useMemo(() => {
     const names = [...new Set(tasks.map((t) => t.phase).filter(Boolean))].slice(0, 8);
     if (!names.length) return [];
@@ -252,7 +280,7 @@ export default function ClientOverview() {
       .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
       .map((t) => {
         const { title } = splitTitleAndDescription(t.taskName, t.description);
-        return { ...t, title };
+        return { ...t, title, progress: getTaskProgressPercent(t) };
       });
   }, [tasks]);
 
@@ -266,21 +294,36 @@ export default function ClientOverview() {
   }, [tasks.length, recentTasksRowsPerPage]);
 
   const activity = useMemo(() => {
+    const STATUS_COLOR = {
+      'Completed':        '#22C55E',
+      'In Development':   '#4F46E5',
+      'Assigned':         '#3B82F6',
+      'Code Review':      '#6366F1',
+      'Testing':          '#06B6D4',
+      'Blocked':          '#EF4444',
+      'On Hold':          '#F59E0B',
+      'Upcoming':         '#64748B',
+    };
     return [...tasks]
       .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
       .slice(0, 6)
       .map((t) => {
         const { title } = splitTitleAndDescription(t.taskName, t.description);
-        const who = getDeveloperDisplayName(t.developer) || 'Unassigned';
-        let text = `updated “${title}”`;
-        if (t.status === 'Completed') text = `completed “${title}”`;
-        else if (t.status === 'In Development') text = `started “${title}”`;
-        else if (t.status === 'Assigned') text = `assigned “${title}”`;
+        let action = 'was updated';
+        if (t.status === 'Completed')           action = 'was completed';
+        else if (t.status === 'In Development') action = 'is in development';
+        else if (t.status === 'Code Review')    action = 'is in code review';
+        else if (t.status === 'Testing')        action = 'is being tested';
+        else if (t.status === 'Assigned')       action = 'was assigned';
+        else if (t.status === 'Blocked')        action = 'is blocked';
+        else if (t.status === 'On Hold')        action = 'is on hold';
+        else if (t.status === 'Upcoming')       action = 'is upcoming';
         return {
           id: t.id,
-          text,
-          who,
-          color: t.developer?.color || ACCENT,
+          title,
+          action,
+          status: t.status,
+          color: STATUS_COLOR[t.status] || ACCENT,
           when: timeAgo(t.updatedAt),
         };
       });
@@ -445,6 +488,41 @@ export default function ClientOverview() {
           </Stack>
         </Stack>
       </Paper>
+      {/* Overdue alert banner if project is overdue */}
+      {projectDateMetrics.isProjectOverdue && (
+        <Paper
+          elevation={0}
+          sx={{
+            mb: 3,
+            p: 2.5,
+            borderRadius: `${tokens.radius.card}px`,
+            bgcolor: '#FEF2F2',
+            border: '1.5px solid #FCA5A5',
+            display: 'flex',
+            gap: 2,
+            alignItems: 'center',
+          }}
+        >
+          <OverdueIcon sx={{ color: '#DC2626', fontSize: 32 }} />
+          <Box sx={{ flex: 1 }}>
+            <Typography sx={{ fontWeight: 800, fontSize: '0.95rem', color: '#991B1B' }}>
+              ⚠️ Project Delivery is Overdue by {projectDateMetrics.projectOverdueDays} Day{projectDateMetrics.projectOverdueDays > 1 ? 's' : ''}
+            </Typography>
+            <Typography sx={{ fontSize: '0.825rem', color: '#7F1D1D', mt: 0.25 }}>
+              Original Target Delivery Date: <strong>{formatDate(projectDateMetrics.originalDeliveryDate)}</strong>
+              {projectDateMetrics.revisedDeliveryDate && (
+                <> (Revised: <strong>{formatDate(projectDateMetrics.revisedDeliveryDate)}</strong>)</>
+              )}
+            </Typography>
+            {projectDateMetrics.deliveryNotes && (
+              <Typography sx={{ fontSize: '0.8rem', color: '#991B1B', fontWeight: 650, mt: 0.75, fontStyle: 'italic' }}>
+                Note from Admin: &ldquo;{projectDateMetrics.deliveryNotes}&rdquo;
+              </Typography>
+            )}
+          </Box>
+        </Paper>
+      )}
+
       {/* Read-only notice */}
       <Paper
         elevation={0}
@@ -618,20 +696,6 @@ export default function ClientOverview() {
           </Paper>
         ))}
       </Box>
-      {/* Project Timeline — Gantt with filters */}
-      <Box sx={{ mb: 3 }}>
-        <OverviewProjectTimeline
-          tasks={tasks}
-          developers={developers}
-          projectName={project?.name || clientProject?.name || ''}
-          loading={loading}
-          readonly
-          dark={isDark}
-          height={400}
-          onOpenFull={() => navigate(timelinePath)}
-          onTaskClick={() => navigate(tasksPath)}
-        />
-      </Box>
       {/* Progress widgets + Activity + Info */}
       <Box
         sx={{
@@ -725,11 +789,8 @@ export default function ClientOverview() {
                 <Stack
                   key={a.id}
                   direction="row"
-                  sx={{
-                    gap: 1.5,
-                    position: 'relative',
-                    py: 1.25
-                  }}>
+                  sx={{ gap: 1.5, position: 'relative', py: 1.25 }}
+                >
                   {idx < activity.length - 1 && (
                     <Box
                       sx={{
@@ -742,14 +803,30 @@ export default function ClientOverview() {
                       }}
                     />
                   )}
-                  <Avatar sx={{ width: 32, height: 32, fontSize: '0.7rem', bgcolor: a.color, zIndex: 1 }}>
-                    {initials(a.who)}
-                  </Avatar>
+                  {/* Status dot instead of developer avatar */}
+                  <Box
+                    sx={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: '50%',
+                      bgcolor: `${a.color}20`,
+                      border: `2px solid ${a.color}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      zIndex: 1,
+                    }}
+                  >
+                    <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: a.color }} />
+                  </Box>
                   <Box sx={{ minWidth: 0 }}>
                     <Typography sx={{ fontSize: '0.8125rem', lineHeight: 1.45 }}>
-                      <Box component="span" sx={{ fontWeight: 750 }}>{a.who}</Box>
+                      <Box component="span" sx={{ fontWeight: 750 }}>
+                        {`"${a.title}"`}
+                      </Box>
                       {' '}
-                      {a.text}
+                      <Box component="span" sx={{ color: '#64748B' }}>{a.action}</Box>
                     </Typography>
                     <Typography sx={{ fontSize: '0.7rem', color: '#94A3B8', mt: 0.25 }}>{a.when}</Typography>
                   </Box>
@@ -760,26 +837,151 @@ export default function ClientOverview() {
         </SectionCard>
 
         <SectionCard title="Project Information">
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-            {[
-              ['Client', clientName],
-              ['Company', clientMeta?.company || '—'],
-              ['Start Date', formatDate(metrics.startDate)],
-              ['Delivery Date', formatDate(metrics.dueDate)],
-              ['Team Size', `${metrics.members || 0}`],
-              ['Modules', `${metrics.moduleCount || 0}`],
-              ['Current Phase', milestones.find((m) => m.active)?.name || '—'],
-              ['Overdue', `${metrics.overdue || 0}`],
-            ].map(([label, value]) => (
-              <Box key={label}>
-                <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#94A3B8', mb: 0.35 }}>
-                  {label.toUpperCase()}
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2.5 }}>
+            {/* Row 1: Client & Company */}
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                CLIENT
+              </Typography>
+              <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }} noWrap>
+                {clientName || '—'}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                COMPANY
+              </Typography>
+              <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }} noWrap>
+                {clientMeta?.company || '—'}
+              </Typography>
+            </Box>
+
+            {/* Row 2: Start Date & Delivery Date */}
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                START DATE
+              </Typography>
+              <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }} noWrap>
+                {formatDate(metrics.startDate)}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                DELIVERY DATE
+              </Typography>
+              <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }} noWrap>
+                {formatDate(projectDateMetrics.originalDeliveryDate)}
+              </Typography>
+            </Box>
+
+            {/* Row 3: Revised Date & Project Overdue */}
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                REVISED DATE
+              </Typography>
+              {projectDateMetrics.revisedDeliveryDate ? (
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography sx={{ fontSize: '0.875rem', fontWeight: 750, color: '#6B21A8' }} noWrap>
+                    {formatDate(projectDateMetrics.revisedDeliveryDate)}
+                  </Typography>
+                  <Chip
+                    label="Extended"
+                    size="small"
+                    sx={{ bgcolor: '#F3E8FF', color: '#6B21A8', fontWeight: 750, height: 20, fontSize: '0.65rem' }}
+                  />
+                </Stack>
+              ) : (
+                <Typography sx={{ fontSize: '0.875rem', color: '#94A3B8' }}>—</Typography>
+              )}
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                PROJECT OVERDUE
+              </Typography>
+              {projectDateMetrics.isProjectOverdue ? (
+                <Chip
+                  icon={<OverdueIcon sx={{ fontSize: '14px !important', color: '#DC2626 !important' }} />}
+                  label={`${projectDateMetrics.projectOverdueDays} Days Overdue`}
+                  size="small"
+                  sx={{
+                    bgcolor: '#FEF2F2',
+                    color: '#B91C1C',
+                    fontWeight: 800,
+                    border: '1px solid #FCA5A5',
+                    height: 22,
+                    fontSize: '0.725rem',
+                  }}
+                />
+              ) : (
+                <Chip
+                  label="On Track"
+                  size="small"
+                  sx={{
+                    bgcolor: '#F0FDF4',
+                    color: '#15803D',
+                    fontWeight: 700,
+                    border: '1px solid #86EFAC',
+                    height: 22,
+                    fontSize: '0.725rem',
+                  }}
+                />
+              )}
+            </Box>
+
+            {/* Row 4: Team Size & Modules */}
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                TEAM SIZE
+              </Typography>
+              <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }} noWrap>
+                {metrics.members || 0}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                MODULES
+              </Typography>
+              <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }} noWrap>
+                {metrics.moduleCount || 0}
+              </Typography>
+            </Box>
+
+            {/* Row 5: Current Phase & Overdue Tasks */}
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                CURRENT PHASE
+              </Typography>
+              <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }} noWrap>
+                {milestones.find((m) => m.active)?.name || '—'}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#94A3B8', mb: 0.35, letterSpacing: '0.04em' }}>
+                OVERDUE TASKS
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: '0.875rem',
+                  fontWeight: 750,
+                  color: metrics.overdue > 0 ? '#DC2626' : '#0F172A',
+                }}
+                noWrap
+              >
+                {metrics.overdue || 0} task{metrics.overdue === 1 ? '' : 's'}
+              </Typography>
+            </Box>
+
+            {/* Row 6: Revision / Extension Note (Full Width if present) */}
+            {projectDateMetrics.deliveryNotes && (
+              <Box sx={{ gridColumn: '1 / -1', pt: 1, borderTop: '1px dashed #E2E8F0' }}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: '#64748B', mb: 0.35, letterSpacing: '0.04em' }}>
+                  REVISION / EXTENSION NOTE
                 </Typography>
-                <Typography sx={{ fontSize: '0.85rem', fontWeight: 650, color: '#0F172A' }} noWrap>
-                  {value}
+                <Typography sx={{ fontSize: '0.825rem', fontWeight: 650, color: '#334155', fontStyle: 'italic', bgcolor: '#F8FAFC', p: 1.5, borderRadius: 1.5, border: '1px solid #E2E8F0' }}>
+                  &ldquo;{projectDateMetrics.deliveryNotes}&rdquo;
                 </Typography>
               </Box>
-            ))}
+            )}
           </Box>
         </SectionCard>
       </Box>
@@ -792,7 +994,7 @@ export default function ClientOverview() {
             <Table stickyHeader size="small" sx={{ minWidth: 800 }}>
               <TableHead>
                 <TableRow>
-                  {['#', 'Task', 'Module', 'Status', 'Assigned To', 'Due Date', 'Priority'].map((h) => (
+                  {['#', 'Task', 'Module', 'Status', 'Progress', 'Due Date', 'Priority'].map((h) => (
                     <TableCell
                       key={h}
                       sx={{
@@ -811,9 +1013,14 @@ export default function ClientOverview() {
               </TableHead>
               <TableBody>
                 {pagedRecentTasks.map((t, idx) => {
-                  const who = getDeveloperDisplayName(t.developer);
                   const chip = STATUS_CHIP[t.status] || STATUS_CHIP.Upcoming;
                   const rowNum = recentTasksPage * recentTasksRowsPerPage + idx + 1;
+                  const pct = t.progress ?? 0;
+                  const barColor =
+                    pct >= 100 ? '#22C55E' :
+                    pct >= 60  ? '#0EA5E9' :
+                    pct >= 40  ? '#8B5CF6' :
+                    pct > 0    ? '#F59E0B' : '#CBD5E1';
                   return (
                     <TableRow
                       key={t.id}
@@ -841,24 +1048,37 @@ export default function ClientOverview() {
                           sx={{ height: 22, fontWeight: 750, fontSize: '0.65rem', ...chip }}
                         />
                       </TableCell>
-                      <TableCell>
-                        {who ? (
-                          <Stack
-                            direction="row"
+                      {/* Progress bar — replaces Assigned To */}
+                      <TableCell sx={{ minWidth: 140 }}>
+                        <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ flex: 1, minWidth: 80 }}>
+                            <LinearProgress
+                              variant="determinate"
+                              value={Math.min(100, Math.max(0, pct))}
+                              sx={{
+                                height: 7,
+                                borderRadius: 99,
+                                bgcolor: 'rgba(148,163,184,0.2)',
+                                '& .MuiLinearProgress-bar': {
+                                  bgcolor: barColor,
+                                  borderRadius: 99,
+                                  transition: 'transform 0.45s ease',
+                                },
+                              }}
+                            />
+                          </Box>
+                          <Typography
                             sx={{
-                              alignItems: "center",
-                              gap: 1
-                            }}>
-                            <Avatar sx={{ width: 24, height: 24, fontSize: '0.65rem', bgcolor: t.developer?.color || ACCENT }}>
-                              {initials(who)}
-                            </Avatar>
-                            <Typography sx={{ fontSize: '0.8rem' }} noWrap>
-                              {who}
-                            </Typography>
-                          </Stack>
-                        ) : (
-                          '—'
-                        )}
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              color: '#64748B',
+                              minWidth: 28,
+                              textAlign: 'right',
+                            }}
+                          >
+                            {pct}%
+                          </Typography>
+                        </Stack>
                       </TableCell>
                       <TableCell>
                         <Typography sx={{ fontSize: '0.8rem' }}>{formatDate(t.dueDate)}</Typography>

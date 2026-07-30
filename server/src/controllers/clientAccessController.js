@@ -111,11 +111,26 @@ async function validateToken(req, res) {
     await record.update({ lastOpenedAt: new Date() });
 
     const project = record.project;
+    const dueDates = await Task.findAll({
+      where: { projectId: project.id },
+      attributes: ['dueDate'],
+      raw: true,
+    }).then(rows => rows.map(r => r.dueDate).filter(Boolean).sort());
+
+    const originalDeliveryDate = project.originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
+    const revisedDeliveryDate = project.revisedDeliveryDate || null;
+    const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
+
     return res.json({
       project: {
         id: project.id,
         name: project.name,
         clientName: project.clientName,
+        originalDeliveryDate,
+        revisedDeliveryDate,
+        targetDeliveryDate: project.targetDeliveryDate || null,
+        deliveryNotes: project.deliveryNotes || null,
+        effectiveDueDate,
       },
       clientMeta: {
         clientName: record.clientName,
@@ -154,7 +169,8 @@ async function getClientTasks(req, res) {
         {
           model: Developer,
           as: 'developer',
-          attributes: ['id', 'name', 'email', 'color'],
+          // Only expose id and color — never name or email to clients
+          attributes: ['id', 'color'],
           required: false,
         },
       ],
@@ -164,26 +180,44 @@ async function getClientTasks(req, res) {
       ],
     });
 
+    // Build a stripped developer map — id + color only, NO name or email
     const developerMap = new Map();
     tasks.forEach((t) => {
       const d = t.developer;
       if (d && !developerMap.has(d.id)) {
         developerMap.set(d.id, {
           id: d.id,
-          name: d.name,
-          email: d.email,
           color: d.color,
         });
       }
     });
+
+    // Strip developer name/email from each task's nested developer object
+    const sanitizedTasks = tasks.map((t) => {
+      const plain = t.toJSON ? t.toJSON() : { ...t };
+      if (plain.developer) {
+        plain.developer = { id: plain.developer.id, color: plain.developer.color };
+      }
+      return plain;
+    });
+
+    const dueDates = tasks.map((t) => t.dueDate).filter(Boolean).sort();
+    const originalDeliveryDate = project.originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
+    const revisedDeliveryDate = project.revisedDeliveryDate || null;
+    const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
 
     return res.json({
       project: {
         id: project.id,
         name: project.name,
         clientName: project.clientName,
+        originalDeliveryDate,
+        revisedDeliveryDate,
+        targetDeliveryDate: project.targetDeliveryDate || null,
+        deliveryNotes: project.deliveryNotes || null,
+        effectiveDueDate,
       },
-      tasks,
+      tasks: sanitizedTasks,
       developers: Array.from(developerMap.values()),
       totalCount: tasks.length,
     });

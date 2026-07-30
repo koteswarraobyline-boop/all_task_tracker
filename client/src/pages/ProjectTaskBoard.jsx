@@ -39,6 +39,7 @@ import { useRole } from '../context/RoleContext';
 import EmptyState from '../components/EmptyState';
 import StatusRemarkDialog, { needsStatusRemark } from '../components/StatusRemarkDialog';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
+import { getTaskProgressPercent } from '../utils/taskProgress';
 
 const EMPTY_FILTERS = {
   sprint: '',
@@ -145,6 +146,13 @@ function buildPhaseTree(workTasks, allTasks, developers) {
           );
           const completed = mod.tasks.filter((t) => t.status === 'Completed').length;
           const total = mod.tasks.length;
+          // Weighted average: each task contributes its workflow-stage progress (0–100)
+          const weightedPct =
+            total > 0
+              ? Math.round(
+                  mod.tasks.reduce((sum, t) => sum + getTaskProgressPercent(t), 0) / total
+                )
+              : 0;
           const owner =
             mod.parentTask &&
             developers.find(
@@ -156,7 +164,7 @@ function buildPhaseTree(workTasks, allTasks, developers) {
             ...mod,
             taskCount: total,
             completedTasks: completed,
-            completionPct: total > 0 ? Math.round((completed / total) * 100) : 0,
+            completionPct: weightedPct,
             ownerName: owner ? getDeveloperDisplayName(owner) : '',
           };
         })
@@ -166,10 +174,13 @@ function buildPhaseTree(workTasks, allTasks, developers) {
 
       let taskCount = 0;
       let completedTasks = 0;
+      let weightedPctSum = 0;
       const developerIds = new Set();
       modules.forEach((m) => {
         taskCount += m.taskCount;
         completedTasks += m.completedTasks;
+        // Accumulate weighted sum for phase-level progress
+        weightedPctSum += m.completionPct * m.taskCount;
         m.tasks.forEach((t) => {
           if (t.developerId) developerIds.add(t.developerId);
         });
@@ -181,7 +192,7 @@ function buildPhaseTree(workTasks, allTasks, developers) {
         modules,
         taskCount,
         completedTasks,
-        completionPct: taskCount > 0 ? Math.round((completedTasks / taskCount) * 100) : 0,
+        completionPct: taskCount > 0 ? Math.round(weightedPctSum / taskCount) : 0,
         developerCount: developerIds.size,
       };
     })

@@ -255,6 +255,7 @@ export default function ProjectGantt({
   tasks = [],
   developers = [],
   readonly = false,
+  hideAssignee = false,
   dark = false,
   compact = false,
   groupBy: groupByProp,
@@ -342,7 +343,6 @@ export default function ProjectGantt({
 
   const columns = useMemo(() => {
     if (listCollapsed) return false;
-    // Compact uses slightly narrower columns; full set always available via horizontal scroll
     const w = compact
       ? { epic: 88, text: 168, progress: 88, assignee: 108, date: 88, left: 48, actions: 36 }
       : { epic: 110, text: 220, progress: 100, assignee: 124, date: 96, left: 52, actions: 40 };
@@ -367,18 +367,22 @@ export default function ProjectGantt({
         width: w.progress,
         cell: ProgressCell,
       },
-      {
-        id: '$assignee',
-        header: 'Assignee',
-        width: w.assignee,
-        cell: AssigneeCell,
-      },
+      // Hide assignee column for client view
+      ...(!hideAssignee
+        ? [
+            {
+              id: '$assignee',
+              header: 'Assignee',
+              width: w.assignee,
+              cell: AssigneeCell,
+            },
+          ]
+        : []),
       {
         id: '$startLabel',
         header: 'Start',
         width: w.date,
         align: 'center',
-        // Derive from live start so drag/CSV dates stay in sync (YYYY-MM-DD)
         cell: ({ row }) => <DateCell value={rowStartLabel(row)} />,
       },
       {
@@ -406,7 +410,7 @@ export default function ProjectGantt({
           ]
         : []),
     ];
-  }, [listCollapsed, compact, readonly, ActionsCell]);
+  }, [listCollapsed, compact, readonly, hideAssignee, ActionsCell]);
 
   /** Fixed left-pane width so Epic→Left columns scroll horizontally instead of clipping. */
   const gridWidth = compact ? 360 : 520;
