@@ -1,10 +1,43 @@
 const { Task, Developer, Project } = require('../models');
 const { sequelize } = require('../config/database');
+const { buildAdminDashboard } = require('../services/adminDashboardService');
+
+// GET /dashboard/global
+exports.getGlobalDashboard = async (req, res) => {
+  try {
+    const projects = await Project.findAll({
+      include: [{
+        model: Task,
+        as: 'tasks',
+        attributes: [
+          'id', 'taskId', 'taskName', 'status', 'updatedAt', 'recordType', 'startDate', 'dueDate',
+          'developerId', 'priority', 'estimatedHours', 'actualHours', 'module', 'tags', 'description',
+        ],
+        include: [{
+          model: Developer,
+          as: 'developer',
+          attributes: ['id', 'name', 'color'],
+          required: false,
+        }],
+      }],
+      order: [['createdAt', 'DESC']],
+    });
+
+    const payload = buildAdminDashboard(projects);
+    res.json(payload);
+  } catch (error) {
+    console.error('Error compiling global dashboard:', error);
+    res.status(500).json({ error: 'Failed to compile global dashboard metrics' });
+  }
+};
 
 // GET /dashboard/:projectId
 exports.getProjectDashboard = async (req, res) => {
+  if (req.params.projectId === 'global') {
+    return exports.getGlobalDashboard(req, res);
+  }
   try {
-    const projectId = parseInt(req.params.projectId);
+    const projectId = parseInt(req.params.projectId, 10);
     if (isNaN(projectId)) {
       return res.status(400).json({ error: 'Invalid project ID' });
     }
@@ -34,7 +67,6 @@ exports.getProjectDashboard = async (req, res) => {
       upcoming: 0,
       assigned: 0,
       inDevelopment: 0,
-      codeReview: 0,
       testing: 0,
       completed: 0,
       blocked: 0,
@@ -46,7 +78,7 @@ exports.getProjectDashboard = async (req, res) => {
         case 'Upcoming': summary.upcoming++; break;
         case 'Assigned': summary.assigned++; break;
         case 'In Development': summary.inDevelopment++; break;
-        case 'Code Review': summary.codeReview++; break;
+        case 'Code Review':
         case 'Testing': summary.testing++; break;
         case 'Completed': summary.completed++; break;
         case 'Blocked': summary.blocked++; break;
@@ -62,7 +94,6 @@ exports.getProjectDashboard = async (req, res) => {
           upcoming: 'Upcoming',
           assigned: 'Assigned',
           inDevelopment: 'In Development',
-          codeReview: 'Code Review',
           testing: 'Testing',
           completed: 'Completed',
           blocked: 'Blocked',

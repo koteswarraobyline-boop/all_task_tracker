@@ -24,6 +24,7 @@ import {
   LinkOff as DisableIcon,
   Link as EnableIcon,
   Email as EmailIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
 import { openClientInviteEmail } from '../utils/clientInviteMail';
@@ -184,6 +185,24 @@ export default function ShareProjectDialog({ open, onClose, project }) {
       showMsg('Share settings saved');
     } catch (error) {
       showMsg(error.response?.data?.error || 'Failed to save settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteLink = async () => {
+    if (!record) return;
+    if (!window.confirm(`Are you sure you want to delete the client access link for "${record.clientName}"?`)) return;
+    setSaving(true);
+    try {
+      await api.deleteClientAccess(record.id);
+      setRecord(null);
+      setClientName('');
+      setCompany('');
+      setEmail('');
+      showMsg('Client access link deleted');
+    } catch (error) {
+      showMsg(error.response?.data?.error || 'Failed to delete client access link', 'error');
     } finally {
       setSaving(false);
     }
@@ -400,6 +419,9 @@ export default function ShareProjectDialog({ open, onClose, project }) {
               disabled={saving}
             >
               {record.status === 'active' ? 'Disable Link' : 'Enable Link'}
+            </Button>
+            <Button startIcon={<DeleteIcon />} color="error" onClick={handleDeleteLink} disabled={saving}>
+              Delete Link
             </Button>
             <Button variant="contained" onClick={handleSaveSettings} disabled={saving}>
               Save Settings

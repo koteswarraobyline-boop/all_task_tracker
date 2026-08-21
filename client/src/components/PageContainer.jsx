@@ -105,12 +105,15 @@ export function MetricCard({
   iconColor = '#4F46E5',
   trend,
   trendUp = true,
+  onClick,
   sx = {},
 }) {
   return (
     <Card
+      onClick={onClick}
       sx={{
         height: '100%',
+        ...(onClick ? { cursor: 'pointer' } : {}),
         '&:hover': {
           transform: 'translateY(-3px)',
           boxShadow: tokens.shadow.hover,

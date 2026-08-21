@@ -2,7 +2,6 @@ export const ALL_STATUSES = [
   'Upcoming',
   'Assigned',
   'In Development',
-  'Code Review',
   'Testing',
   'Completed',
   'Blocked',
@@ -13,13 +12,18 @@ export const STATUS_LABELS = {
   Upcoming: 'Planned',
   Assigned: 'Assigned',
   'In Development': 'In Development',
-  'Code Review': 'Code Review',
   Testing: 'Testing',
   Completed: 'Completed',
   Blocked: 'Blocked',
   'On Hold': 'On Hold',
   Planned: 'Planned',
 };
+
+/** Map retired DB statuses to current workflow values for display and filters. */
+export function normalizeLegacyStatus(status) {
+  if (status === 'Code Review') return 'Testing';
+  return status;
+}
 
 export const PRIORITY_BADGES_LIGHT = {
   P0: { color: '#EF4444', bgcolor: '#FEF2F2', borderColor: '#FCA5A5' },
@@ -63,9 +67,6 @@ export function getStatusStyle(statusVal, isDark = false) {
     Testing: isDark
       ? { bgcolor: '#581c87', color: '#D8B4FE', border: '1px solid #6b21a8', text: 'Testing' }
       : { bgcolor: '#FAF5FF', color: '#9333EA', border: '1px solid #E9D5FF', text: 'Testing' },
-    'Code Review': isDark
-      ? { bgcolor: '#312e81', color: '#A5B4FC', border: '1px solid #3730a3', text: 'Code Review' }
-      : { bgcolor: '#EEF2FF', color: '#4F46E5', border: '1px solid #C7D2FE', text: 'Code Review' },
     Blocked: isDark
       ? { bgcolor: '#450a0a', color: '#FCA5A5', border: '1px solid #7f1d1d', text: 'Blocked' }
       : { bgcolor: '#FEF2F2', color: '#DC2626', border: '1px solid #FCA5A5', text: 'Blocked' },

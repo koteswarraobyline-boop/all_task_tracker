@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Chip, LinearProgress, Stack, Typography } from '@mui/material';
 import { getTaskProgressPercent, progressBarColor } from '../../utils/taskProgress';
-import { getStatusStyle } from './constants';
+import { getStatusStyle, normalizeLegacyStatus } from './constants';
 
 const BAR_COLORS = {
   success: '#22C55E',
@@ -12,7 +12,8 @@ const BAR_COLORS = {
 };
 
 export function StatusBadge({ status, isDark = false, size = 'default' }) {
-  const style = getStatusStyle(status, isDark);
+  const normalized = normalizeLegacyStatus(status);
+  const style = getStatusStyle(normalized, isDark);
   return (
     <Chip
       label={style.text}
@@ -130,7 +131,7 @@ export function ProgressCell({
 }
 
 export function StatusDot({ status, isDark = false }) {
-  const style = getStatusStyle(status, isDark);
+  const style = getStatusStyle(normalizeLegacyStatus(status), isDark);
   return (
     <Box
       sx={{

@@ -6,7 +6,6 @@ import {
   Timelapse as ProgressIcon,
   Block as BlockedIcon,
   Groups as DevsIcon,
-  Speed as SprintIcon,
 } from '@mui/icons-material';
 
 const CARDS = [
@@ -55,15 +54,6 @@ const CARDS = [
     iconColor: '#7C3AED',
     bar: '#8B5CF6',
   },
-  {
-    key: 'sprint',
-    label: 'Sprint Progress',
-    icon: SprintIcon,
-    gradient: 'linear-gradient(135deg, #FFF7ED 0%, #FFFFFF 70%)',
-    iconBg: '#FFF7ED',
-    iconColor: '#EA580C',
-    bar: '#F59E0B',
-  },
 ];
 
 export default function TaskBoardSummary({ stats }) {
@@ -73,7 +63,6 @@ export default function TaskBoardSummary({ stats }) {
     inProgress: stats.inProgress ?? 0,
     blocked: stats.blocked ?? 0,
     developers: stats.developers ?? 0,
-    sprint: stats.sprintPct ?? 0,
   };
 
   const percents = {
@@ -82,15 +71,13 @@ export default function TaskBoardSummary({ stats }) {
     inProgress: values.total ? Math.round((values.inProgress / values.total) * 100) : 0,
     blocked: values.total ? Math.round((values.blocked / values.total) * 100) : 0,
     developers: Math.min(100, (values.developers || 0) * 12),
-    sprint: values.sprint,
   };
 
   return (
     <Grid container spacing={2}>
       {CARDS.map((card) => {
         const Icon = card.icon;
-        const isSprint = card.key === 'sprint';
-        const display = isSprint ? `${values.sprint}%` : values[card.key];
+        const display = values[card.key];
         return (
           <Grid key={card.key} size={{ xs: 6, sm: 4, md: 2 }}>
             <Box

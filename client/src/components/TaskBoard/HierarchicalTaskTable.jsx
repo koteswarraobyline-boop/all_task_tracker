@@ -15,23 +15,27 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
   KeyboardArrowDown as ExpandIcon,
   KeyboardArrowRight as CollapseIcon,
+  WarningAmber as WarningIcon,
 } from '@mui/icons-material';
 import { splitTitleAndDescription } from '../TaskDetailsDrawer';
 import { getDeveloperDisplayName } from '../../utils/developerDisplay';
+import { getOverdueDays } from '../../utils/taskManagementConstants';
 import { ProgressCell, PriorityBadge, StatusBadge, StatusDot } from './Badges';
 import TaskActionsMenu from './TaskActionsMenu';
-import { ALL_STATUSES, phaseAccent } from './constants';
+import { ALL_STATUSES, phaseAccent, normalizeLegacyStatus } from './constants';
 
 function InlineStatusSelect({ value, onChange, isDark, canEdit }) {
   if (!canEdit) return <StatusBadge status={value} isDark={isDark} />;
+  const displayValue = normalizeLegacyStatus(value);
   return (
     <Select
-      value={value}
+      value={displayValue}
       onChange={onChange}
       onClick={(e) => e.stopPropagation()}
       size="small"
@@ -169,16 +173,16 @@ export default function HierarchicalTaskTable({
   onTogglePhase,
   onToggleModule,
   onRowClick,
+  onDeleteTask,
   onStatusChange,
   onDeveloperChange,
-  onWeekChange,
-  availableSprints,
-  normalizeWeekKey,
   page,
   rowsPerPage,
   onPageChange,
   onRowsPerPageChange,
   totalCount,
+  primaryDelayTaskId = null,
+  delayTaskMap = {},
 }) {
   return (
     <Paper
@@ -213,7 +217,6 @@ export default function HierarchicalTaskTable({
               <TableCell sx={headCellSx}>End Date</TableCell>
               <TableCell sx={headCellSx}>Priority</TableCell>
               <TableCell sx={headCellSx}>Progress</TableCell>
-              {!isClient && <TableCell sx={headCellSx}>Sprint</TableCell>}
               {!isClient && (
                 <TableCell sx={{ ...headCellSx, width: 56 }} align="center">
                   Actions
@@ -224,7 +227,7 @@ export default function HierarchicalTaskTable({
           <TableBody>
             {phaseTree.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isClient ? 7 : 10} sx={{ py: 6, textAlign: 'center' }}>
+                <TableCell colSpan={isClient ? 7 : 9} sx={{ py: 6, textAlign: 'center' }}>
                   <Typography color="text.secondary" fontWeight={600}>
                     No phases or modules match your filters
                   </Typography>
@@ -253,7 +256,7 @@ export default function HierarchicalTaskTable({
                         transition: 'background 0.15s ease',
                       }}
                     >
-                      <TableCell colSpan={isClient ? 6 : 7} sx={{ pl: 1.5 }}>
+                      <TableCell colSpan={isClient ? 6 : 6} sx={{ pl: 1.5 }}>
                         <Stack direction="row" spacing={1.25} alignItems="center">
                           <Box
                             sx={{
@@ -329,15 +332,23 @@ export default function HierarchicalTaskTable({
                     {phaseOpen &&
                       phase.modules.map((mod) => {
                         const modOpen = expandedModules[mod.id] !== false;
+                        const moduleHasPrimaryDelay =
+                          primaryDelayTaskId != null &&
+                          mod.tasks.some((t) => String(t.id) === String(primaryDelayTaskId));
                         return (
                           <React.Fragment key={mod.id}>
                             <TableRow
                               onClick={() => onToggleModule(mod.id)}
                               sx={{
                                 cursor: 'pointer',
-                                bgcolor: isDark
-                                  ? 'rgba(15,23,42,0.35)'
-                                  : 'rgba(255,255,255,0.7)',
+                                bgcolor: moduleHasPrimaryDelay
+                                  ? isDark
+                                    ? 'rgba(239,68,68,0.08)'
+                                    : 'rgba(254,242,242,0.7)'
+                                  : isDark
+                                    ? 'rgba(15,23,42,0.35)'
+                                    : 'rgba(255,255,255,0.7)',
+                                borderLeft: moduleHasPrimaryDelay ? '3px solid #FCA5A5' : undefined,
                                 '& td': {
                                   borderBottom: '1px solid',
                                   borderColor: 'divider',
@@ -350,7 +361,7 @@ export default function HierarchicalTaskTable({
                                 },
                               }}
                             >
-                              <TableCell colSpan={isClient ? 6 : 7} sx={{ pl: 5 }}>
+                              <TableCell colSpan={isClient ? 6 : 6} sx={{ pl: 5 }}>
                                 <Stack direction="row" spacing={1} alignItems="center">
                                   <IconButton size="small" sx={{ p: 0.25 }}>
                                     {modOpen ? (
@@ -422,12 +433,23 @@ export default function HierarchicalTaskTable({
                                   task.taskName,
                                   task.description
                                 ).title;
+                                const delayInfo = delayTaskMap[task.id];
+                                const isPrimaryDelay =
+                                  primaryDelayTaskId != null &&
+                                  String(task.id) === String(primaryDelayTaskId);
+                                const isContributor = delayInfo?.isContributor && !isPrimaryDelay;
                                 return (
                                   <TableRow
                                     key={task.id}
                                     onClick={() => onRowClick(task)}
                                     sx={{
                                       cursor: 'pointer',
+                                      bgcolor: isPrimaryDelay
+                                        ? 'rgba(239,68,68,0.08)'
+                                        : isContributor
+                                          ? 'rgba(249,115,22,0.06)'
+                                          : undefined,
+                                      borderLeft: isPrimaryDelay ? '4px solid #EF4444' : undefined,
                                       '& td': {
                                         borderBottom: '1px solid',
                                         borderColor: 'divider',
@@ -435,7 +457,9 @@ export default function HierarchicalTaskTable({
                                         fontSize: '0.8125rem',
                                       },
                                       '&:hover': {
-                                        bgcolor: 'action.hover',
+                                        bgcolor: isPrimaryDelay
+                                          ? 'rgba(239,68,68,0.12)'
+                                          : 'action.hover',
                                         '& .row-actions': { opacity: 1 },
                                       },
                                       transition: 'background 0.12s ease',
@@ -449,6 +473,28 @@ export default function HierarchicalTaskTable({
                                         sx={{ minWidth: 0 }}
                                       >
                                         <StatusDot status={task.status} isDark={isDark} />
+                                        {isPrimaryDelay && (
+                                          <Tooltip
+                                            title={
+                                              delayInfo?.explanation ||
+                                              'Likely primary delay driver for this project'
+                                            }
+                                          >
+                                            <Chip
+                                              icon={<WarningIcon sx={{ fontSize: '14px !important' }} />}
+                                              label="Primary delay"
+                                              size="small"
+                                              sx={{
+                                                height: 22,
+                                                fontWeight: 800,
+                                                fontSize: '0.62rem',
+                                                bgcolor: '#FEE2E2',
+                                                color: '#B91C1C',
+                                                flexShrink: 0,
+                                              }}
+                                            />
+                                          </Tooltip>
+                                        )}
                                         <Typography
                                           sx={{
                                             fontWeight: 600,
@@ -502,6 +548,24 @@ export default function HierarchicalTaskTable({
                                     </TableCell>
                                     <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
                                       {task.dueDate || '—'}
+                                      {(() => {
+                                        const daysLate = getOverdueDays(task);
+                                        if (!daysLate) return null;
+                                        return (
+                                          <Chip
+                                            size="small"
+                                            label={`${daysLate}d late`}
+                                            sx={{
+                                              ml: 0.75,
+                                              height: 20,
+                                              fontSize: '0.65rem',
+                                              fontWeight: 700,
+                                              bgcolor: '#FEE2E2',
+                                              color: '#B91C1C',
+                                            }}
+                                          />
+                                        );
+                                      })()}
                                     </TableCell>
                                     <TableCell>
                                       <PriorityBadge
@@ -513,63 +577,23 @@ export default function HierarchicalTaskTable({
                                       <ProgressCell task={task} width={72} />
                                     </TableCell>
                                     {!isClient && (
-                                    <TableCell onClick={(e) => e.stopPropagation()}>
-                                      {canEdit ? (
-                                        <Select
-                                          value={
-                                            normalizeWeekKey(task.week) === 'Unscheduled'
-                                              ? ''
-                                              : normalizeWeekKey(task.week)
-                                          }
-                                          onChange={(e) =>
-                                            onWeekChange(task.id, e.target.value || null)
-                                          }
-                                          size="small"
-                                          variant="standard"
-                                          disableUnderline
-                                          displayEmpty
-                                          sx={{
-                                            fontSize: '0.8rem',
-                                            fontWeight: 650,
-                                            minWidth: 72,
-                                          }}
-                                        >
-                                          <MenuItem value="">
-                                            <em>—</em>
-                                          </MenuItem>
-                                          {availableSprints.map((opt) => (
-                                            <MenuItem key={opt} value={opt}>
-                                              {opt}
-                                            </MenuItem>
-                                          ))}
-                                        </Select>
-                                      ) : (
-                                        <Typography
-                                          variant="body2"
-                                          sx={{ fontWeight: 650, fontSize: '0.8rem' }}
-                                        >
-                                          {task.week || '—'}
-                                        </Typography>
-                                      )}
-                                    </TableCell>
-                                    )}
                                     <TableCell
                                       align="center"
                                       onClick={(e) => e.stopPropagation()}
                                     >
-                                      {!isClient && (
-                                        <TaskActionsMenu
-                                          task={task}
-                                          canEdit={canEdit}
-                                          canAssign={canAssign}
-                                          canStatus={canStatus}
-                                          onView={() => onRowClick(task)}
-                                          onEdit={() => onRowClick(task, true)}
-                                          onAssign={() => onRowClick(task, true)}
-                                          onMoveStatus={() => onRowClick(task, true)}
-                                        />
-                                      )}
+                                      <TaskActionsMenu
+                                        task={task}
+                                        canEdit={canEdit}
+                                        canAssign={canAssign}
+                                        canStatus={canStatus}
+                                        onView={() => onRowClick(task)}
+                                        onEdit={() => onRowClick(task, true)}
+                                        onAssign={() => onRowClick(task, true)}
+                                        onMoveStatus={() => onRowClick(task, true)}
+                                        onDelete={onDeleteTask ? () => onDeleteTask(task) : undefined}
+                                      />
                                     </TableCell>
+                                    )}
                                   </TableRow>
                                 );
                               })}

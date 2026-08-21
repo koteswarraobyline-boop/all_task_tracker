@@ -41,18 +41,17 @@ const STATUS_COLORS = {
   Upcoming: '#64748B',
   Assigned: '#3B82F6',
   'In Development': '#4F46E5',
-  'Code Review': '#6366F1',
   Testing: '#06B6D4',
   Completed: '#22C55E',
   Blocked: '#EF4444',
   'On Hold': '#F59E0B',
+  'Code Review': '#06B6D4',
 };
 
 const ALL_STATUSES = [
   'Upcoming',
   'Assigned',
   'In Development',
-  'Code Review',
   'Testing',
   'Completed',
   'Blocked',

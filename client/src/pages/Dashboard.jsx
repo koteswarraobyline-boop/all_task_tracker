@@ -1,19 +1,17 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
-  Area,
-  AreaChart,
+  Legend,
 } from 'recharts';
 import {
   Box,
@@ -21,168 +19,85 @@ import {
   Button,
   Stack,
   Avatar,
-  AvatarGroup,
-  LinearProgress,
   CircularProgress,
   Chip,
   IconButton,
   Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TablePagination,
   Tooltip,
   Menu,
   MenuItem,
   Divider,
   Skeleton,
-  Fab,
-  Collapse,
-  useTheme,
+  Alert,
+  Link,
 } from '@mui/material';
 import {
   Assignment as TasksIcon,
   CheckCircle as CheckIcon,
-  AccessTime as ProgressIcon,
-  WarningAmber as OverdueIcon,
-  HourglassEmpty as PendingIcon,
-  Groups as TeamIcon,
-  AccountTree as ModulesIcon,
-  BugReport as IssuesIcon,
+  Code as DevIcon,
+  Science as TestingIcon,
+  PauseCircle as HoldIcon,
+  Block as BlockedIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
   Share as ShareIcon,
-  Edit as EditIcon,
   MoreVert as MoreIcon,
-  Dashboard as BoardIcon,
+  ViewKanban as BoardIcon,
   CalendarMonth as CalendarIcon,
-  Add as AddIcon,
-  ExpandMore as ExpandIcon,
-  ExpandLess as CollapseIcon,
-  Schedule as ScheduleIcon,
-  CloudUpload as UploadIcon,
+  Timeline as TimelineIcon,
+  FileDownload as ExportIcon,
+  ContentCopy as CopyIcon,
+  Link as LinkIcon,
+  ChevronRight as ChevronIcon,
+  Refresh as RefreshIcon,
   OpenInNew as OpenIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
 import PageContainer, { MetricCard } from '../components/PageContainer';
 import ShareProjectDialog from '../components/ShareProjectDialog';
-import UpdateDeliveryDateDialog from '../components/UpdateDeliveryDateDialog';
-import OverviewProjectTimeline from '../components/OverviewProjectTimeline';
+import TaskDetailsDrawer, { splitTitleAndDescription } from '../components/TaskDetailsDrawer';
 import Can from '../components/Can';
+import { ProjectNavTabs } from '../components/ProjectDashboard';
+import {
+  formatProjectId,
+  formatShortDate,
+  timeAgo,
+  pctOf,
+  computeKpiMetrics,
+  computeScheduleBuckets,
+  buildProgressTimelinePercent,
+  buildStatusDonutData,
+  buildPriorityDonutData,
+  exportTasksCsv,
+  relativeDeadlineLabel,
+  deadlinePillSx,
+  computeHealthScore,
+  deliveryStatusMessage,
+  isOverdue,
+  getOverdueDays,
+  isWorkTask,
+} from '../components/ProjectDashboard/dashboardHelpers';
+import { DelayAnalysisDrawer, ProjectHealthBadge } from '../components/DeliveryHealth';
+import { deliveryStatusLabel } from '../utils/deliveryHealth';
 import { tokens } from '../theme';
 import { useProjectId } from '../hooks/useProjectId';
-import { useRole } from '../context/RoleContext';
-import { splitTitleAndDescription } from '../components/TaskDetailsDrawer';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
-import { getTaskProgressPercent } from '../utils/taskProgress';
-
-const STATUS_COLORS = {
-  Upcoming: '#3B82F6',
-  Assigned: '#6366F1',
-  'In Development': '#F97316',
-  'Code Review': '#EAB308',
-  Testing: '#06B6D4',
-  Completed: '#22C55E',
-  Blocked: '#EF4444',
-  'On Hold': '#94A3B8',
-};
-
-const STATUS_CHIP = {
-  Active: { bgcolor: '#D1FAE5', color: '#047857' },
-  Completed: { bgcolor: '#DBEAFE', color: '#1D4ED8' },
-  'On Hold': { bgcolor: '#FFEDD5', color: '#C2410C' },
-  Delayed: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-};
-
-const PRIORITY_SX = {
-  High: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-  P0: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-  P1: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-  Medium: { bgcolor: '#FFEDD5', color: '#C2410C' },
-  P2: { bgcolor: '#FFEDD5', color: '#C2410C' },
-  Low: { bgcolor: '#DCFCE7', color: '#15803D' },
-  P3: { bgcolor: '#DCFCE7', color: '#15803D' },
-};
+import { PRIORITY_COLORS } from '../utils/taskManagementConstants';
+import { startOfDay } from '../utils/taskManagementConstants';
 
 const glassSx = {
-  bgcolor: 'rgba(255,255,255,0.78)',
-  backdropFilter: 'blur(14px)',
+  bgcolor: 'background.paper',
   border: '1px solid',
-  borderColor: 'rgba(226,232,240,0.95)',
+  borderColor: 'divider',
   boxShadow: tokens.shadow.card,
   borderRadius: `${tokens.radius.card}px`,
 };
-
-function timeAgo(dateString) {
-  if (!dateString) return '';
-  const now = new Date();
-  const past = new Date(dateString);
-  const diffMs = now - past;
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays === 1) return 'Yesterday';
-  return past.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function formatShortDate(value) {
-  if (!value) return '—';
-  try {
-    return new Date(value).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return value;
-  }
-}
-
-function pctOf(part, total) {
-  if (!total) return 0;
-  return Math.round((part / total) * 100);
-}
-
-function workTasks(list) {
-  return (list || []).filter((t) => t.recordType !== 'module');
-}
-
-function initials(name = '') {
-  return (
-    name
-      .split(' ')
-      .map((n) => n[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase() || '?'
-  );
-}
-
-function priorityStyle(priority) {
-  const key = Object.keys(PRIORITY_SX).find(
-    (k) => k.toLowerCase() === String(priority || '').toLowerCase()
-  );
-  return PRIORITY_SX[key] || PRIORITY_SX.Medium;
-}
 
 function SectionCard({ title, action, children, sx = {} }) {
   return (
     <Paper elevation={0} sx={{ ...glassSx, p: 3, height: '100%', ...sx }}>
       {(title || action) && (
-        <Stack
-          direction="row"
-          sx={{
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 1,
-            mb: 2.5
-          }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mb={2.5}>
           {title ? (
             <Typography sx={{ fontWeight: 750, fontSize: '0.95rem', letterSpacing: '-0.01em' }}>
               {title}
@@ -198,15 +113,44 @@ function SectionCard({ title, action, children, sx = {} }) {
   );
 }
 
-function EmptyBlock({ title, cta, onClick }) {
+function WidgetError({ message, onRetry }) {
+  return (
+    <Alert
+      severity="error"
+      action={
+        onRetry ? (
+          <Button color="inherit" size="small" startIcon={<RefreshIcon />} onClick={onRetry}>
+            Retry
+          </Button>
+        ) : null
+      }
+      sx={{ borderRadius: 2 }}
+    >
+      {message}
+    </Alert>
+  );
+}
+
+function initials(name = '') {
+  return (
+    name
+      .split(' ')
+      .map((n) => n[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || '?'
+  );
+}
+
+function EmptyWidget({ title, cta, onClick }) {
   return (
     <Box sx={{ py: 4, textAlign: 'center' }}>
       <Typography sx={{ fontWeight: 650, mb: 0.5 }}>{title}</Typography>
-      <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: 2 }}>
+      <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: cta ? 2 : 0 }}>
         Nothing to show here yet.
       </Typography>
       {cta && (
-        <Button size="small" variant="contained" onClick={onClick}>
+        <Button size="small" variant="outlined" onClick={onClick}>
           {cta}
         </Button>
       )}
@@ -214,44 +158,38 @@ function EmptyBlock({ title, cta, onClick }) {
   );
 }
 
+const STATUS_CHIP = {
+  Active: { bgcolor: '#D1FAE5', color: '#047857' },
+  Completed: { bgcolor: '#DBEAFE', color: '#1D4ED8' },
+  'On Hold': { bgcolor: '#FFEDD5', color: '#C2410C' },
+  Delayed: { bgcolor: '#FEE2E2', color: '#B91C1C' },
+};
+
 export default function Dashboard() {
   const projectId = useProjectId();
   const navigate = useNavigate();
-  const theme = useTheme();
-  const isDark = theme.palette.mode === 'dark';
-  const { role, project: clientProject, clientMeta } = useRole();
-  const isClient = role === 'client';
-
-  const tasksPath = isClient
-    ? `/client/${clientMeta?.token}/tasks`
-    : `/projects/${projectId}/tasks`;
-  const calendarPath = isClient
-    ? `/client/${clientMeta?.token}/calendar`
-    : `/projects/${projectId}/calendar`;
-  const timelinePath = isClient
-    ? `/client/${clientMeta?.token}/timeline`
-    : `/projects/${projectId}/timeline`;
+  const basePath = `/projects/${projectId}`;
 
   const [project, setProject] = useState(null);
   const [dashboardData, setDashboardData] = useState(null);
   const [tasks, setTasks] = useState([]);
-  const [modules, setModules] = useState([]);
   const [developers, setDevelopers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState(null);
+  const [tasksError, setTasksError] = useState(null);
+  const [delayAnalysis, setDelayAnalysis] = useState(null);
+  const [delayDrawerOpen, setDelayDrawerOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [dateDialogOpen, setDateDialogOpen] = useState(false);
-  const [menuAnchor, setMenuAnchor] = useState(null);
+  const [shareMenuAnchor, setShareMenuAnchor] = useState(null);
+  const [exportMenuAnchor, setExportMenuAnchor] = useState(null);
+  const [moreMenuAnchor, setMoreMenuAnchor] = useState(null);
   const [favorite, setFavorite] = useState(false);
-  const [recentTasksPage, setRecentTasksPage] = useState(0);
-  const [recentTasksRowsPerPage, setRecentTasksRowsPerPage] = useState(8);
-  const [mobileOpen, setMobileOpen] = useState({
-    team: true,
-    tasks: true,
-    activity: true,
-    charts: true,
-  });
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [snack, setSnack] = useState('');
 
   const favKey = `tt_fav_project_${projectId}`;
+  const today = useMemo(() => startOfDay(), []);
 
   useEffect(() => {
     setFavorite(localStorage.getItem(favKey) === '1');
@@ -263,182 +201,128 @@ export default function Dashboard() {
     localStorage.setItem(favKey, next ? '1' : '0');
   };
 
-  const load = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     if (!projectId) return;
     try {
-      setLoading(true);
-      const [devs, metrics, tasksResponse] = await Promise.all([
-        api.getDevelopers().catch(() => []),
-        api.getProjectDashboard(projectId),
-        api.getProjectTasks(projectId, { limit: -1 }),
-      ]);
-
-      if (isClient && clientProject) {
-        setProject(clientProject);
-      } else {
-        const allProjects = await api.getProjects();
-        const found = (allProjects || []).find((p) => p.id === parseInt(projectId, 10));
-        setProject(found || { name: `Project #${projectId}`, id: projectId });
-      }
-
-      const all = tasksResponse?.tasks || [];
-      setModules(all.filter((t) => t.recordType === 'module'));
-      setTasks(workTasks(all));
-      setDevelopers(devs || []);
+      setDashboardError(null);
+      const metrics = await api.getProjectDashboard(projectId);
       setDashboardData(metrics);
-    } catch (error) {
-      console.error('Failed to load project overview:', error);
+    } catch (e) {
+      console.error(e);
+      setDashboardError('Failed to load dashboard metrics');
       setDashboardData(null);
-    } finally {
-      setLoading(false);
     }
-  }, [projectId, isClient, clientProject]);
+  }, [projectId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const loadTasks = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      setTasksError(null);
+      const tasksResponse = await api.getProjectTasks(projectId, { limit: -1 });
+      setTasks((tasksResponse?.tasks || []).filter(isWorkTask));
+    } catch (e) {
+      console.error(e);
+      setTasksError('Failed to load tasks');
+      setTasks([]);
+    }
+  }, [projectId]);
 
-  const today = useMemo(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
+  const loadProject = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const allProjects = await api.getProjects();
+      const found = (allProjects || []).find((p) => p.id === parseInt(projectId, 10));
+      setProject(found || { name: `Project #${projectId}`, id: projectId });
+    } catch (e) {
+      console.error(e);
+      setProject({ name: `Project #${projectId}`, id: projectId });
+    }
+  }, [projectId]);
+
+  const loadDelayAnalysis = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const analysis = await api.getProjectDelayAnalysis(projectId);
+      setDelayAnalysis(analysis);
+    } catch {
+      setDelayAnalysis(null);
+    }
+  }, [projectId]);
+
+  const loadDevelopers = useCallback(async () => {
+    try {
+      const devs = await api.getDevelopers();
+      setDevelopers(devs || []);
+    } catch {
+      setDevelopers([]);
+    }
   }, []);
 
-  const metrics = useMemo(() => {
-    const list = tasks;
-    const total = list.length;
-    const completed = list.filter((t) => t.status === 'Completed').length;
-    const inProgress = list.filter((t) =>
-      ['Assigned', 'In Development', 'Code Review', 'Testing'].includes(t.status)
-    ).length;
-    const pending = list.filter((t) => ['Upcoming', 'Assigned'].includes(t.status)).length;
-    const overdue = list.filter((t) => {
-      if (!t.dueDate || t.status === 'Completed') return false;
-      return new Date(t.dueDate) < today;
-    }).length;
-    const blocked = list.filter((t) => t.status === 'Blocked').length;
-    const moduleCount = modules.length || project?.moduleCount || new Set(list.map((t) => t.module).filter(Boolean)).size;
-    const members = new Set(list.map((t) => t.developerId).filter(Boolean)).size;
-    const progress = total ? Math.round((completed / total) * 100) : project?.progress || 0;
-    const estimated = list.reduce((s, t) => s + (Number(t.estimatedHours) || 0), 0);
-    const actual = list.reduce((s, t) => s + (Number(t.actualHours) || 0), 0);
-    return {
-      total,
-      completed,
-      inProgress,
-      pending,
-      overdue,
-      blocked,
-      moduleCount,
-      members,
-      progress,
-      remaining: Math.max(0, total - completed),
-      estimated,
-      actual,
-    };
-  }, [tasks, modules, project, today]);
-
-  const daysRemaining = useMemo(() => {
-    const due = project?.dueDate;
-    if (!due) return null;
-    const diff = Math.ceil((new Date(due) - today) / 86400000);
-    return diff;
-  }, [project, today]);
-
-  const statusLegend = useMemo(() => {
-    if (!dashboardData?.statusDistribution) return [];
-    const total = metrics.total || 1;
-    return dashboardData.statusDistribution.map((row) => ({
-      ...row,
-      color: STATUS_COLORS[row.name] || '#64748B',
-      pct: pctOf(row.value, total),
-    }));
-  }, [dashboardData, metrics.total]);
-
-  const timelineData = useMemo(() => {
-    const raw = dashboardData?.taskProgressTimeline || [];
-    return raw.slice(-14).map((row) => ({
-      ...row,
-      label: String(row.date).slice(5),
-    }));
-  }, [dashboardData]);
-
-  const phases = useMemo(() => {
-    const names = [
-      ...new Set(tasks.map((t) => t.phase).filter((p) => p && String(p).trim())),
-    ].slice(0, 8);
-    if (!names.length) return [];
-
-    const built = names.map((name) => {
-      const related = tasks.filter((t) => t.phase === name);
-      const doneCount = related.filter((t) => t.status === 'Completed').length;
-      const pct = related.length ? Math.round((doneCount / related.length) * 100) : 0;
-      return {
-        name,
-        pct,
-        done: pct >= 100,
-      };
-    });
-    const currentIdx = built.findIndex((p) => p.pct < 100);
-    return built.map((p, idx) => ({
-      ...p,
-      current: currentIdx >= 0 && idx === currentIdx,
-    }));
-  }, [tasks]);
-
-  const teamCards = useMemo(() => {
-    return developers
-      .map((dev) => {
-        const mine = tasks.filter((t) => t.developerId === dev.id);
-        if (!mine.length) return null;
-        const completed = mine.filter((t) => t.status === 'Completed').length;
-        const active = mine.filter((t) =>
-          ['Assigned', 'In Development', 'Code Review', 'Testing'].includes(t.status)
-        ).length;
-        const workload = mine.length ? Math.round((active / mine.length) * 100) : 0;
-        const isManager = project?.manager?.id === dev.id;
-        return {
-          id: dev.id,
-          name: getDeveloperDisplayName(dev) || dev.name,
-          color: dev.color || '#4F46E5',
-          role: isManager ? 'Project Manager' : 'Developer',
-          currentTasks: active,
-          total: mine.length,
-          completed,
-          workload,
-          isManager,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => Number(b.isManager) - Number(a.isManager) || b.total - a.total)
-      .slice(0, 8);
-  }, [developers, tasks, project]);
-
-  const recentTasks = useMemo(() => {
-    return [...tasks]
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-      .map((t) => {
-        const { title } = splitTitleAndDescription(t.taskName, t.description);
-        return { ...t, title, progress: getTaskProgressPercent(t) };
-      });
-  }, [tasks]);
-
-  const pagedRecentTasks = useMemo(() => {
-    const start = recentTasksPage * recentTasksRowsPerPage;
-    return recentTasks.slice(start, start + recentTasksRowsPerPage);
-  }, [recentTasks, recentTasksPage, recentTasksRowsPerPage]);
+  const loadAll = useCallback(async () => {
+    if (!projectId) return;
+    setLoading(true);
+    await Promise.all([
+      loadProject(),
+      loadDashboard(),
+      loadTasks(),
+      loadDelayAnalysis(),
+      loadDevelopers(),
+    ]);
+    setLoading(false);
+  }, [projectId, loadProject, loadDashboard, loadTasks, loadDelayAnalysis, loadDevelopers]);
 
   useEffect(() => {
-    setRecentTasksPage(0);
-  }, [tasks.length, recentTasksRowsPerPage]);
+    loadAll();
+  }, [loadAll]);
 
-  const activity = useMemo(() => {
+  const metrics = useMemo(() => computeKpiMetrics(tasks), [tasks]);
+  const scheduleBuckets = useMemo(() => computeScheduleBuckets(tasks, today), [tasks, today]);
+  const statusDonut = useMemo(() => buildStatusDonutData(tasks), [tasks]);
+  const priorityDonut = useMemo(() => buildPriorityDonutData(tasks), [tasks]);
+  const timelineData = useMemo(
+    () => buildProgressTimelinePercent(dashboardData?.taskProgressTimeline, metrics.total),
+    [dashboardData, metrics.total]
+  );
+
+  const healthScore = useMemo(
+    () =>
+      computeHealthScore(
+        delayAnalysis?.completionPercent ?? pctOf(metrics.completed, metrics.total),
+        scheduleBuckets,
+        project?.deliveryStatus || delayAnalysis?.deliveryStatus
+      ),
+    [delayAnalysis, metrics, scheduleBuckets, project?.deliveryStatus]
+  );
+
+  const upcomingDeadlines = useMemo(() => {
+    return tasks
+      .filter((t) => t.dueDate && t.status !== 'Completed' && !isOverdue(t, today))
+      .map((t) => {
+        const { title } = splitTitleAndDescription(t.taskName, t.description);
+        return { ...t, title };
+      })
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+      .slice(0, 8);
+  }, [tasks, today]);
+
+  const overdueTasks = useMemo(() => {
+    return tasks
+      .filter((t) => isOverdue(t, today))
+      .map((t) => {
+        const { title } = splitTitleAndDescription(t.taskName, t.description);
+        return { ...t, title, lateDays: getOverdueDays(t, today) };
+      })
+      .sort((a, b) => b.lateDays - a.lateDays)
+      .slice(0, 8);
+  }, [tasks, today]);
+
+  const recentActivity = useMemo(() => {
     return [...tasks]
       .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
       .slice(0, 10)
       .map((t) => {
         const { title } = splitTitleAndDescription(t.taskName, t.description);
-        const who = getDeveloperDisplayName(t.developer) || 'Unassigned';
+        const who = getDeveloperDisplayName(t.developer) || 'Team member';
         let action = 'updated';
         let color = '#F59E0B';
         if (t.status === 'Completed') {
@@ -448,151 +332,111 @@ export default function Dashboard() {
           action = 'flagged blocked';
           color = '#EF4444';
         } else if (t.status === 'In Development') {
-          action = 'started working on';
+          action = 'started';
           color = '#4F46E5';
-        } else if (t.status === 'Assigned') {
-          action = 'was assigned';
-          color = '#6366F1';
-        } else if (t.status === 'Upcoming') {
-          action = 'was created';
-          color = '#3B82F6';
         }
-        return {
-          id: t.id,
-          who,
-          color: t.developer?.color || color,
-          action,
-          title,
-          when: timeAgo(t.updatedAt),
-          eventColor: color,
-        };
+        return { id: t.id, who, action, title, when: timeAgo(t.updatedAt), color: t.developer?.color || color };
       });
   }, [tasks]);
 
-  const workloadBars = useMemo(() => {
-    return (dashboardData?.developerWorkload || [])
-      .filter((d) => d.developerName !== 'Unassigned')
-      .map((d) => ({
-        name: String(d.developerName || '').split(' ')[0] || d.developerName,
-        fullName: d.developerName,
-        completed: d.completed || 0,
-        inProgress: d.inProgress || 0,
-        upcoming: d.upcoming || 0,
-        total: (d.completed || 0) + (d.inProgress || 0) + (d.upcoming || 0),
-      }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 6);
-  }, [dashboardData]);
-
-  const deadlines = useMemo(() => {
-    const buckets = { today: [], tomorrow: [], week: [], overdue: [] };
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    const week = new Date(today);
-    week.setDate(today.getDate() + 7);
-
-    tasks.forEach((t) => {
-      if (!t.dueDate || t.status === 'Completed') return;
-      const due = new Date(t.dueDate);
-      due.setHours(0, 0, 0, 0);
-      const { title } = splitTitleAndDescription(t.taskName, t.description);
-      const item = { ...t, title };
-      if (due < today) buckets.overdue.push(item);
-      else if (due.getTime() === today.getTime()) buckets.today.push(item);
-      else if (due.getTime() === tomorrow.getTime()) buckets.tomorrow.push(item);
-      else if (due <= week) buckets.week.push(item);
-    });
-    return buckets;
-  }, [tasks, today]);
-
-  const timeUsage =
-    metrics.estimated > 0
-      ? Math.min(100, Math.round((metrics.actual / metrics.estimated) * 100))
-      : 0;
-
-  const tags = project?.tags || [];
+  const teamSize = project?.members?.length ?? new Set(tasks.map((t) => t.developerId).filter(Boolean)).size;
   const statusChip = STATUS_CHIP[project?.status] || STATUS_CHIP.Active;
-  const nextMilestone = phases.find((p) => !p.done) || phases[phases.length - 1];
+  const projectCode = formatProjectId(project?.id || projectId);
+  const ownerLabel = project?.clientName || project?.manager?.name || '—';
+
+  const goTasks = (status) => {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    navigate(`${basePath}/tasks${q}`);
+  };
+
+  const handleCopyClientLink = async () => {
+    setShareMenuAnchor(null);
+    try {
+      const records = await api.listClientAccess({ projectId: project?.id });
+      const record = (records || []).find((r) => Number(r.projectId) === Number(project?.id));
+      if (!record?.shareUrl) {
+        setSnack('Generate a share link first via Share Client Portal');
+        setShareOpen(true);
+        return;
+      }
+      await navigator.clipboard.writeText(record.shareUrl);
+      setSnack('Client link copied');
+    } catch {
+      setSnack('Could not copy link');
+    }
+  };
 
   const kpis = [
     {
       label: 'Total Tasks',
       value: metrics.total,
+      pct: 100,
       icon: <TasksIcon />,
       tint: '#EFF6FF',
       iconColor: '#2563EB',
-      trend: `• ${metrics.remaining} remaining`,
-      trendUp: true,
+      onClick: () => goTasks(),
     },
     {
       label: 'Completed',
       value: metrics.completed,
+      pct: pctOf(metrics.completed, metrics.total),
       icon: <CheckIcon />,
       tint: '#ECFDF5',
       iconColor: '#059669',
-      trend: `• ${metrics.progress}% done`,
-      trendUp: true,
+      onClick: () => goTasks('Completed'),
     },
     {
-      label: 'In Progress',
-      value: metrics.inProgress,
-      icon: <ProgressIcon />,
+      label: 'In Development',
+      value: metrics.inDevelopment,
+      pct: pctOf(metrics.inDevelopment, metrics.total),
+      icon: <DevIcon />,
+      tint: '#EFF6FF',
+      iconColor: '#2563EB',
+      onClick: () => goTasks('In Development'),
+    },
+    {
+      label: 'Testing',
+      value: metrics.testing,
+      pct: pctOf(metrics.testing, metrics.total),
+      icon: <TestingIcon />,
+      tint: '#FAF5FF',
+      iconColor: '#9333EA',
+      onClick: () => goTasks('Testing'),
+    },
+    {
+      label: 'On Hold',
+      value: metrics.onHold,
+      pct: pctOf(metrics.onHold, metrics.total),
+      icon: <HoldIcon />,
       tint: '#FFF7ED',
       iconColor: '#EA580C',
-    },
-    {
-      label: 'Pending',
-      value: metrics.pending,
-      icon: <PendingIcon />,
-      tint: '#F8FAFC',
-      iconColor: '#64748B',
-    },
-    {
-      label: 'Overdue',
-      value: metrics.overdue,
-      icon: <OverdueIcon />,
-      tint: '#FEF2F2',
-      iconColor: '#DC2626',
-      ...(metrics.overdue > 0
-        ? { trend: `• ${metrics.overdue} overdue`, trendUp: false }
-        : {}),
-    },
-    {
-      label: 'Team Members',
-      value: metrics.members || teamCards.length,
-      icon: <TeamIcon />,
-      tint: '#EEF2FF',
-      iconColor: '#6366F1',
-    },
-    {
-      label: 'Modules',
-      value: metrics.moduleCount,
-      icon: <ModulesIcon />,
-      tint: '#F5F3FF',
-      iconColor: '#7C3AED',
+      onClick: () => goTasks('On Hold'),
     },
     {
       label: 'Blocked',
       value: metrics.blocked,
-      icon: <IssuesIcon />,
-      tint: '#FFF1F2',
-      iconColor: '#E11D48',
-      ...(metrics.blocked > 0
-        ? { trend: `• ${metrics.blocked} blocked`, trendUp: false }
-        : {}),
+      pct: pctOf(metrics.blocked, metrics.total),
+      icon: <BlockedIcon />,
+      tint: '#FEF2F2',
+      iconColor: '#DC2626',
+      onClick: () => goTasks('Blocked'),
     },
   ];
 
-  const toggleSection = (key) =>
-    setMobileOpen((s) => ({ ...s, [key]: !s[key] }));
+  const openTask = (task) => {
+    setSelectedTask(task);
+    setDrawerOpen(true);
+  };
 
   if (loading) {
     return (
-      <PageContainer maxWidth={1800}>
-        <Skeleton variant="rounded" height={140} sx={{ mb: 3, borderRadius: 3 }} />
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)', lg: 'repeat(4,1fr)' }, gap: 2, mb: 3 }}>
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <Skeleton key={i} variant="rounded" height={120} sx={{ borderRadius: 3 }} />
+      <PageContainer maxWidth={tokens.layout.maxWidth}>
+        <Skeleton variant="text" width={200} height={24} sx={{ mb: 1 }} />
+        <Skeleton variant="rounded" height={160} sx={{ mb: 3, borderRadius: 3 }} />
+        <Skeleton variant="rounded" height={48} sx={{ mb: 3, borderRadius: 2 }} />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)', lg: 'repeat(3,1fr)' }, gap: 2, mb: 3 }}>
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Skeleton key={i} variant="rounded" height={130} sx={{ borderRadius: 3 }} />
           ))}
         </Box>
         <Skeleton variant="rounded" height={320} sx={{ borderRadius: 3 }} />
@@ -601,274 +445,111 @@ export default function Dashboard() {
   }
 
   return (
-    <PageContainer maxWidth={1800}>
-      {/* Ambient background wash */}
-      <Box
-        aria-hidden
-        sx={{
-          position: 'fixed',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 0,
-          background:
-            'radial-gradient(ellipse 80% 50% at 10% -10%, rgba(79,70,229,0.08), transparent 50%), radial-gradient(ellipse 60% 40% at 90% 10%, rgba(14,165,233,0.06), transparent 45%)',
-        }}
-      />
-      {/* HEADER */}
-      <Paper
-        component={motion.div}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        elevation={0}
-        sx={{ ...glassSx, p: { xs: 2.5, md: 3.5 }, mb: 4, position: 'relative', overflow: 'hidden' }}
-      >
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            background: 'linear-gradient(135deg, rgba(79,70,229,0.06) 0%, transparent 55%)',
-            pointerEvents: 'none',
-          }}
-        />
-        <Stack
-          direction={{ xs: 'column', lg: 'row' }}
-          sx={{
-            justifyContent: "space-between",
-            alignItems: { xs: 'stretch', lg: 'center' },
-            gap: 3,
-            position: 'relative'
-          }}>
+    <PageContainer maxWidth={tokens.layout.maxWidth} sx={{ py: { xs: 2, md: 2.5 } }}>
+      {snack && (
+        <Alert severity="info" onClose={() => setSnack('')} sx={{ mb: 2 }}>
+          {snack}
+        </Alert>
+      )}
+
+      {/* Breadcrumb */}
+      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 2 }}>
+        <Link component={RouterLink} to="/projects" underline="hover" sx={{ fontWeight: 650, fontSize: '0.875rem', color: 'text.secondary' }}>
+          Projects
+        </Link>
+        <ChevronIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+        <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>{project?.name}</Typography>
+      </Stack>
+
+      {/* Header */}
+      <Paper elevation={0} sx={{ ...glassSx, p: { xs: 2.5, md: 3 }, mb: 2 }}>
+        <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ lg: 'flex-start' }} gap={2}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Stack
-              direction="row"
-              sx={{
-                alignItems: "flex-start",
-                gap: 1.5,
-                mb: 1
-              }}>
-              <Typography
-                component="h1"
-                sx={{
-                  fontSize: { xs: '1.65rem', md: '2.15rem' },
-                  fontWeight: 800,
-                  letterSpacing: '-0.025em',
-                  lineHeight: 1.2,
-                  flex: 1,
-                  minWidth: 0,
-                  overflowWrap: 'anywhere',
-                }}
-              >
-                {project?.name || 'Project'}
+            <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1} mb={0.75}>
+              <Typography component="h1" sx={{ fontSize: { xs: '1.5rem', md: '1.85rem' }, fontWeight: 800, letterSpacing: '-0.025em' }}>
+                {project?.name}
               </Typography>
-              <Stack
-                direction="row"
-                sx={{
-                  gap: 0.5,
-                  flexShrink: 0
-                }}>
-                <Tooltip title={favorite ? 'Unfavorite' : 'Favorite'}>
-                  <IconButton onClick={toggleFavorite} size="small" sx={{ color: favorite ? '#F59E0B' : 'text.secondary' }}>
-                    {favorite ? <StarIcon /> : <StarBorderIcon />}
-                  </IconButton>
-                </Tooltip>
-                {!isClient && (
-                  <Can permission="project.share">
-                    <Tooltip title="Share">
-                      <IconButton size="small" onClick={() => setShareOpen(true)}>
-                        <ShareIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Can>
-                )}
-                {!isClient && (
-                  <Can permission="csv.upload">
-                    <Tooltip title="Import / Update">
-                      <IconButton
-                        size="small"
-                        onClick={() => navigate(`/projects/upload?projectId=${projectId}`)}
-                      >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Can>
-                )}
-                <IconButton size="small" onClick={(e) => setMenuAnchor(e.currentTarget)}>
-                  <MoreIcon fontSize="small" />
+              {project?.deliveryStatus && <ProjectHealthBadge status={project.deliveryStatus} />}
+              <Tooltip title={favorite ? 'Unfavorite' : 'Favorite'}>
+                <IconButton onClick={toggleFavorite} size="small" sx={{ color: favorite ? '#F59E0B' : 'text.secondary' }}>
+                  {favorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
                 </IconButton>
-              </Stack>
+              </Tooltip>
+              <IconButton size="small" onClick={(e) => setMoreMenuAnchor(e.currentTarget)}>
+                <MoreIcon fontSize="small" />
+              </IconButton>
             </Stack>
-
-            {project?.clientName && (
-              <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', fontWeight: 600, mb: 1 }}>
-                {project.clientName}
-              </Typography>
-            )}
-            {project?.description && (
-              <Typography
-                sx={{
-                  fontSize: '0.875rem',
-                  color: 'text.secondary',
-                  lineHeight: 1.55,
-                  mb: 2,
-                  maxWidth: 640,
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                }}
-              >
-                {project.description}
-              </Typography>
-            )}
-
-            <Stack
-              direction="row"
-              useFlexGap
-              sx={{
-                gap: 1,
-                flexWrap: "wrap"
-              }}>
-              <Chip
-                size="small"
-                label={project?.status || 'Active'}
-                sx={{ fontWeight: 700, height: 26, ...statusChip }}
-              />
-              <Chip
-                size="small"
-                label={project?.priority || 'Medium'}
-                sx={{ fontWeight: 700, height: 26, ...priorityStyle(project?.priority) }}
-              />
-              {tags.slice(0, 4).map((tag) => (
-                <Chip
-                  key={tag}
-                  size="small"
-                  label={tag}
-                  sx={{ height: 26, fontWeight: 650, bgcolor: '#EEF2FF', color: '#4338CA' }}
-                />
-              ))}
-            </Stack>
+            <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary', fontWeight: 600 }}>
+              {projectCode}
+              {project?.description ? ` · ${project.description}` : ''}
+            </Typography>
           </Box>
 
-          {/* Progress ring + countdown */}
-          <Stack
-            direction="row"
-            sx={{
-              gap: 3,
-              alignItems: "center",
-              justifyContent: { xs: 'flex-start', lg: 'flex-end' },
-              flexShrink: 0
-            }}>
-            <Box sx={{ position: 'relative', width: 108, height: 108 }}>
-              <CircularProgress
-                variant="determinate"
-                value={100}
-                size={108}
-                thickness={4}
-                sx={{ color: '#E2E8F0', position: 'absolute' }}
-              />
-              <CircularProgress
-                variant="determinate"
-                value={metrics.progress}
-                size={108}
-                thickness={4}
-                sx={{
-                  color: metrics.progress >= 100 ? '#22C55E' : '#4F46E5',
-                  position: 'absolute',
-                  '& .MuiCircularProgress-circle': { strokeLinecap: 'round' },
-                }}
-              />
-              <Box
-                sx={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
+          <Stack spacing={1.5} alignItems={{ xs: 'stretch', lg: 'flex-end' }} sx={{ flexShrink: 0 }}>
+            <Stack direction="row" flexWrap="wrap" gap={1} justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
+              <Can permission="project.share">
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<ShareIcon />}
+                  endIcon={<ChevronIcon sx={{ fontSize: 16, transform: 'rotate(90deg)' }} />}
+                  onClick={(e) => setShareMenuAnchor(e.currentTarget)}
+                  sx={{ bgcolor: 'background.paper', height: 36, textTransform: 'none', fontWeight: 600 }}
+                >
+                  Share Project
+                </Button>
+              </Can>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<ExportIcon />}
+                endIcon={<ChevronIcon sx={{ fontSize: 16, transform: 'rotate(90deg)' }} />}
+                onClick={(e) => setExportMenuAnchor(e.currentTarget)}
+                sx={{ bgcolor: 'background.paper', height: 36, textTransform: 'none', fontWeight: 600 }}
               >
-                <Typography sx={{ fontWeight: 800, fontSize: '1.35rem', lineHeight: 1 }}>
-                  {metrics.progress}%
+                Export Report
+              </Button>
+              <Button variant="contained" size="small" startIcon={<BoardIcon />} onClick={() => goTasks()} sx={{ height: 36, textTransform: 'none', fontWeight: 600 }}>
+                Open Task Board
+              </Button>
+            </Stack>
+            <Stack direction="row" flexWrap="wrap" gap={2.5} justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
+              {[
+                ['Start Date', formatShortDate(project?.startDate)],
+                ['Target Date', formatShortDate(project?.activeDeliveryDate || project?.dueDate)],
+              ].map(([label, value]) => (
+                <Box key={label} sx={{ textAlign: { lg: 'right' } }}>
+                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', letterSpacing: '0.04em' }}>
+                    {label}
+                  </Typography>
+                  <Typography sx={{ fontWeight: 700, fontSize: '0.85rem' }}>{value}</Typography>
+                </Box>
+              ))}
+              <Box sx={{ textAlign: { lg: 'right' } }}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', letterSpacing: '0.04em', mb: 0.25 }}>
+                  Project Owner
                 </Typography>
-                <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 600 }}>
-                  Complete
-                </Typography>
+                <Stack direction="row" alignItems="center" gap={0.75} justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
+                  <Avatar sx={{ width: 24, height: 24, fontSize: '0.65rem', bgcolor: tokens.colors.primary }}>
+                    {initials(ownerLabel)}
+                  </Avatar>
+                  <Typography sx={{ fontWeight: 700, fontSize: '0.85rem' }}>{ownerLabel}</Typography>
+                </Stack>
               </Box>
-            </Box>
-
-            <Box>
-              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', mb: 0.5 }}>
-                DUE DATE
-              </Typography>
-              <Typography sx={{ fontWeight: 800, fontSize: '1.5rem', lineHeight: 1.2, letterSpacing: '-0.02em' }}>
-                {daysRemaining == null
-                  ? '—'
-                  : daysRemaining < 0
-                    ? `${Math.abs(daysRemaining)}d overdue`
-                    : `${daysRemaining} Days`}
-              </Typography>
-              <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mt: 0.5 }}>
-                {daysRemaining == null
-                  ? 'No due date set'
-                  : daysRemaining < 0
-                    ? `Was due ${formatShortDate(project?.dueDate)}`
-                    : `Remaining · ${formatShortDate(project?.dueDate)}`}
-              </Typography>
-            </Box>
+            </Stack>
           </Stack>
         </Stack>
-
-        {/* Quick actions */}
-        <Stack
-          direction="row"
-          useFlexGap
-          sx={{
-            gap: 1.25,
-            flexWrap: "wrap",
-            mt: 3,
-            position: 'relative'
-          }}>
-          {!isClient && (
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate(tasksPath)}>
-              Create Task
-            </Button>
-          )}
-          <Button variant="outlined" startIcon={<BoardIcon />} onClick={() => navigate(tasksPath)} sx={{ bgcolor: '#fff' }}>
-            Open Board
-          </Button>
-          <Button variant="outlined" startIcon={<CalendarIcon />} onClick={() => navigate(calendarPath)} sx={{ bgcolor: '#fff' }}>
-            Calendar
-          </Button>
-          {!isClient && (
-            <Can permission="project.share">
-              <Button variant="outlined" startIcon={<ShareIcon />} onClick={() => setShareOpen(true)} sx={{ bgcolor: '#fff' }}>
-                Share Project
-              </Button>
-            </Can>
-          )}
-          {!isClient && (
-            <Button
-              variant="outlined"
-              startIcon={<TeamIcon />}
-              onClick={() => navigate('/developers')}
-              sx={{ bgcolor: '#fff' }}
-            >
-              Team
-            </Button>
-          )}
-        </Stack>
       </Paper>
-      {/* KPI GRID */}
+
+      <ProjectNavTabs projectId={projectId} />
+
+      {/* KPI cards */}
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            sm: 'repeat(2, minmax(0, 1fr))',
-            md: 'repeat(4, minmax(0, 1fr))',
-          },
-          gap: 2.5,
-          mb: 4,
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)', lg: 'repeat(3,1fr)', xl: 'repeat(6,1fr)' },
+          gap: 1.5,
+          mb: 2.5,
         }}
       >
         {kpis.map((k) => (
@@ -879,801 +560,427 @@ export default function Dashboard() {
             icon={k.icon}
             tint={k.tint}
             iconColor={k.iconColor}
-            trend={k.trend}
-            trendUp={k.trendUp}
+            trend={k.label === 'Total Tasks' ? 'All tasks' : `${k.pct}%`}
+            trendUp={k.label === 'Completed' || k.label === 'Total Tasks'}
+            onClick={k.onClick}
+            sx={{
+              '& .MuiCardContent-root': { p: 2.25, '&:last-child': { pb: 2.25 } },
+              '& h1': { fontSize: { xs: '1.65rem', md: '1.85rem' } },
+            }}
           />
         ))}
       </Box>
-      {/* MAIN + SIDEBAR */}
+
+      {/* Analytics row — delivery | progress | details */}
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1fr) 320px' },
-          gap: 3,
-          alignItems: 'start',
+          gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr', xl: '1.2fr 1.2fr 0.85fr' },
+          gap: 2,
+          mb: 2.5,
+          alignItems: 'stretch',
         }}
       >
-        <Stack spacing={3} sx={{ minWidth: 0 }}>
-          {/* Overall progress */}
-          <SectionCard title="Overall Progress">
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', md: '140px 1fr' },
-                gap: 3,
-                alignItems: 'center',
-              }}
-            >
-              <Box sx={{ position: 'relative', width: 120, height: 120, mx: 'auto' }}>
-                <CircularProgress variant="determinate" value={100} size={120} thickness={5} sx={{ color: '#E2E8F0', position: 'absolute' }} />
-                <CircularProgress
-                  variant="determinate"
-                  value={metrics.progress}
-                  size={120}
-                  thickness={5}
-                  sx={{ color: '#4F46E5', position: 'absolute', '& .MuiCircularProgress-circle': { strokeLinecap: 'round' } }}
-                />
-                <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography sx={{ fontWeight: 800, fontSize: '1.5rem' }}>{metrics.progress}%</Typography>
-                </Box>
-              </Box>
-              <Stack spacing={2}>
-                {[
-                  { label: 'Task Completion', value: metrics.progress, color: '#4F46E5' },
-                  {
-                    label: 'Module Completion',
-                    value: modules.length
-                      ? pctOf(
-                          modules.filter((m) => m.status === 'Completed').length,
-                          modules.length
-                        )
-                      : 0,
-                    color: '#7C3AED',
-                  },
-                  ...(phases.length
-                    ? [
-                        {
-                          label: 'Phase Completion',
-                          value: pctOf(phases.filter((p) => p.done).length, phases.length),
-                          color: '#22C55E',
-                        },
-                      ]
-                    : []),
-                ].map((row) => (
-                  <Box key={row.label}>
-                    <Stack
-                      direction="row"
-                      sx={{
-                        justifyContent: "space-between",
-                        mb: 0.75
-                      }}>
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 650 }}>{row.label}</Typography>
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 750 }}>{row.value}%</Typography>
-                    </Stack>
-                    <LinearProgress
-                      variant="determinate"
-                      value={row.value}
-                      sx={{
-                        height: 8,
-                        borderRadius: 99,
-                        bgcolor: '#E2E8F0',
-                        '& .MuiLinearProgress-bar': { bgcolor: row.color, borderRadius: 99 },
-                      }}
-                    />
+        <SectionCard title="Delivery Health" sx={{ p: 2.5 }}>
+          {tasksError ? (
+            <WidgetError message={tasksError} onRetry={loadTasks} />
+          ) : (
+            <Stack spacing={2}>
+              <Stack direction="row" alignItems="center" gap={2.5}>
+                <Box sx={{ position: 'relative', width: 112, height: 112, flexShrink: 0 }}>
+                  <CircularProgress variant="determinate" value={100} size={112} thickness={3.5} sx={{ color: '#E2E8F0', position: 'absolute' }} />
+                  <CircularProgress
+                    variant="determinate"
+                    value={healthScore}
+                    size={112}
+                    thickness={3.5}
+                    sx={{
+                      color: healthScore >= 70 ? '#22C55E' : healthScore >= 45 ? '#F59E0B' : '#EF4444',
+                      position: 'absolute',
+                      '& .MuiCircularProgress-circle': { strokeLinecap: 'round' },
+                    }}
+                  />
+                  <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <Typography sx={{ fontWeight: 800, fontSize: '1.75rem', lineHeight: 1 }}>{healthScore}</Typography>
+                    <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 700 }}>Score /100</Typography>
                   </Box>
-                ))}
+                </Box>
+                <Stack spacing={1} sx={{ flex: 1 }}>
+                  {[
+                    { label: 'Ahead of Schedule', count: scheduleBuckets.ahead, color: '#22C55E' },
+                    { label: 'On Schedule', count: scheduleBuckets.onSchedule, color: '#2563EB' },
+                    { label: 'At Risk', count: scheduleBuckets.atRisk, color: '#F59E0B' },
+                    { label: 'Overdue', count: scheduleBuckets.overdue, color: '#EF4444' },
+                  ].map((b) => (
+                    <Stack key={b.label} direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary', fontWeight: 600 }}>{b.label}</Typography>
+                      <Typography sx={{ fontWeight: 800, fontSize: '0.9rem', color: b.color }}>{b.count}</Typography>
+                    </Stack>
+                  ))}
+                </Stack>
               </Stack>
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: `${tokens.radius.button}px`,
+                  bgcolor: project?.deliveryStatus === 'OVERDUE' ? '#FEF2F2' : '#ECFDF5',
+                  border: '1px solid',
+                  borderColor: project?.deliveryStatus === 'OVERDUE' ? '#FECACA' : '#A7F3D0',
+                }}
+              >
+                <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700, color: project?.deliveryStatus === 'OVERDUE' ? '#B91C1C' : '#047857', mb: 0.25 }}>
+                  {deliveryStatusLabel(project?.deliveryStatus || delayAnalysis?.deliveryStatus || 'ON_TRACK')}
+                </Typography>
+                <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', lineHeight: 1.45 }}>
+                  {deliveryStatusMessage(project?.deliveryStatus || delayAnalysis?.deliveryStatus)}
+                </Typography>
+              </Box>
+              {delayAnalysis && (
+                <Button size="small" variant="outlined" onClick={() => setDelayDrawerOpen(true)} sx={{ alignSelf: 'flex-start', fontWeight: 700, textTransform: 'none' }}>
+                  View Delay Analysis
+                </Button>
+              )}
+            </Stack>
+          )}
+        </SectionCard>
+
+        <SectionCard title="Progress Over Time" sx={{ p: 2.5 }}>
+          {dashboardError ? (
+            <WidgetError message={dashboardError} onRetry={loadDashboard} />
+          ) : timelineData.length === 0 ? (
+            <EmptyWidget title="Progress history will appear as project activity is recorded." cta="Open Task Board" onClick={() => goTasks()} />
+          ) : (
+            <Box sx={{ height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={timelineData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
+                  <RechartsTooltip formatter={(v, name) => [`${v}%`, name]} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="actualPct" name="Actual Progress" stroke="#4F46E5" strokeWidth={2.5} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="plannedPct" name="Baseline" stroke="#94A3B8" strokeWidth={1.5} strokeDasharray="5 5" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
             </Box>
+          )}
+        </SectionCard>
+
+        <SectionCard title="Project Details" sx={{ p: 2.5, display: { xs: 'none', xl: 'block' } }}>
+          <Stack spacing={1.75}>
+            {[
+              ['Project ID', projectCode],
+              ['Owner', ownerLabel],
+              ['Project Manager', project?.manager?.name || '—'],
+              ['Priority', project?.priority || 'Medium'],
+              ['Status', project?.status || 'Active'],
+              ['Target Date', formatShortDate(project?.activeDeliveryDate || project?.dueDate)],
+              ['Team Size', `${teamSize} Members`],
+            ].map(([label, value]) => (
+              <Stack key={label} direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600 }}>{label}</Typography>
+                {label === 'Status' ? (
+                  <Chip size="small" label={value} sx={{ fontWeight: 700, height: 24, ...statusChip }} />
+                ) : label === 'Priority' ? (
+                  <Chip size="small" label={value} sx={{ fontWeight: 700, height: 24, bgcolor: '#FEE2E2', color: '#B91C1C' }} />
+                ) : (
+                  <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem', textAlign: 'right' }}>{value}</Typography>
+                )}
+              </Stack>
+            ))}
+            {project?.tags?.length > 0 && (
+              <Box sx={{ pt: 0.5 }}>
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600, mb: 0.75 }}>Tags</Typography>
+                <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                  {project.tags.slice(0, 3).map((tag) => (
+                    <Chip key={tag} size="small" label={tag} sx={{ height: 24, fontWeight: 650, bgcolor: '#EEF2FF', color: '#4338CA' }} />
+                  ))}
+                  {project.tags.length > 3 && (
+                    <Chip size="small" label={`+${project.tags.length - 3}`} sx={{ height: 24, fontWeight: 650 }} />
+                  )}
+                </Stack>
+              </Box>
+            )}
+            {project?.description && (
+              <Box sx={{ pt: 0.5 }}>
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600, mb: 0.5 }}>Description</Typography>
+                <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {project.description}
+                </Typography>
+              </Box>
+            )}
+          </Stack>
+        </SectionCard>
+      </Box>
+
+      <Stack spacing={2} sx={{ minWidth: 0 }}>
+          {/* Mobile / tablet project details */}
+          <SectionCard title="Project Details" sx={{ p: 2.5, display: { xs: 'block', xl: 'none' } }}>
+            <Stack spacing={1.75}>
+              {[
+                ['Project ID', projectCode],
+                ['Owner', ownerLabel],
+                ['Project Manager', project?.manager?.name || '—'],
+                ['Team Size', `${teamSize} Members`],
+              ].map(([label, value]) => (
+                <Stack key={label} direction="row" justifyContent="space-between">
+                  <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600 }}>{label}</Typography>
+                  <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{value}</Typography>
+                </Stack>
+              ))}
+            </Stack>
           </SectionCard>
 
-          {/* Project Timeline — Gantt with filters */}
-          <OverviewProjectTimeline
-            tasks={tasks}
-            developers={developers}
-            projectName={project?.name || ''}
-            loading={loading}
-            readonly={isClient}
-            dark={isDark}
-            height={400}
-            onOpenFull={() => navigate(timelinePath)}
-            onTaskClick={() => navigate(tasksPath)}
-            onDatesChange={
-              isClient
-                ? undefined
-                : async (taskId, dates) => {
-                    const updated = await api.updateTask(taskId, dates);
-                    setTasks((prev) =>
-                      prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t))
-                    );
-                    return updated;
-                  }
-            }
-          />
-
-          {/* Team */}
-          <Box>
-            <Stack
-              direction="row"
-              sx={{
-                justifyContent: "space-between",
-                alignItems: "center",
-                mb: 2,
-                display: { md: 'none' }
-              }}>
-              <Typography sx={{ fontWeight: 750 }}>Team Members</Typography>
-              <IconButton size="small" onClick={() => toggleSection('team')}>
-                {mobileOpen.team ? <CollapseIcon /> : <ExpandIcon />}
-              </IconButton>
-            </Stack>
-            <Collapse in={mobileOpen.team} sx={{ display: { xs: 'block', md: 'block' } }}>
-              <Typography sx={{ fontWeight: 750, fontSize: '0.95rem', mb: 2, display: { xs: 'none', md: 'block' } }}>
-                Team Members
-              </Typography>
-              {teamCards.length === 0 ? (
-                <SectionCard>
-                  <EmptyBlock title="No team assigned" cta="Open Board" onClick={() => navigate(tasksPath)} />
-                </SectionCard>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+            <SectionCard title="Tasks by Status">
+              {statusDonut.length === 0 ? (
+                <EmptyWidget title="No tasks yet" />
               ) : (
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
-                    gap: 2,
-                  }}
-                >
-                  {teamCards.map((m) => (
-                    <Paper
-                      key={m.id}
-                      component={motion.div}
-                      whileHover={{ y: -3 }}
-                      elevation={0}
-                      sx={{
-                        ...glassSx,
-                        p: 2.5,
-                        borderColor: m.isManager ? 'primary.main' : 'rgba(226,232,240,0.95)',
-                        boxShadow: m.isManager ? '0 8px 24px rgba(79,70,229,0.12)' : tokens.shadow.card,
-                      }}
-                    >
-                      <Stack
-                        direction="row"
+                <>
+                  <Box sx={{ height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={statusDonut} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2}>
+                          {statusDonut.map((entry) => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </Box>
+                  <Stack direction="row" flexWrap="wrap" gap={0.75} justifyContent="center" sx={{ mt: 1 }}>
+                    {statusDonut.map((s) => (
+                      <Chip key={s.name} size="small" label={`${s.name} (${s.value})`} sx={{ height: 24, fontWeight: 650, bgcolor: `${s.color}18`, color: s.color }} />
+                    ))}
+                  </Stack>
+                </>
+              )}
+            </SectionCard>
+
+            <SectionCard title="Tasks by Priority">
+              {priorityDonut.length === 0 ? (
+                <EmptyWidget title="No priority data" />
+              ) : (
+                <>
+                  <Box sx={{ height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={priorityDonut} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2}>
+                          {priorityDonut.map((entry) => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </Box>
+                  <Stack direction="row" flexWrap="wrap" gap={0.75} justifyContent="center" sx={{ mt: 1 }}>
+                    {priorityDonut.map((s) => (
+                      <Chip
+                        key={s.name}
+                        size="small"
+                        label={`${s.name} (${s.value})`}
                         sx={{
-                          gap: 1.5,
-                          alignItems: "center",
-                          mb: 1.5
-                        }}>
-                        <Avatar sx={{ bgcolor: m.color, width: 44, height: 44, fontWeight: 700 }}>
-                          {initials(m.name)}
-                        </Avatar>
-                        <Box sx={{ minWidth: 0, flex: 1 }}>
-                          <Typography sx={{ fontWeight: 750, fontSize: '0.875rem' }} noWrap>
-                            {m.name}
-                          </Typography>
-                          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{m.role}</Typography>
-                        </Box>
-                      </Stack>
-                      <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mb: 1 }}>
-                        {m.currentTasks} active · {m.completed} done
-                      </Typography>
-                      <Typography sx={{ fontSize: '0.7rem', fontWeight: 650, mb: 0.5 }}>
-                        Workload {m.workload}%
-                      </Typography>
-                      <LinearProgress
-                        variant="determinate"
-                        value={m.workload}
-                        sx={{
-                          height: 6,
-                          borderRadius: 99,
-                          mb: 1.5,
-                          bgcolor: '#E2E8F0',
-                          '& .MuiLinearProgress-bar': {
-                            bgcolor: m.workload > 80 ? '#EF4444' : '#4F46E5',
-                            borderRadius: 99,
-                          },
+                          height: 24,
+                          fontWeight: 650,
+                          bgcolor: PRIORITY_COLORS[s.name]?.bgcolor || '#F1F5F9',
+                          color: PRIORITY_COLORS[s.name]?.color || '#64748B',
                         }}
                       />
-                      <Button size="small" variant="contained" fullWidth onClick={() => navigate(tasksPath)}>
-                        Tasks
-                      </Button>
-                    </Paper>
-                  ))}
-                </Box>
-              )}
-            </Collapse>
-          </Box>
-
-          {/* Recent tasks table */}
-          <SectionCard
-            title="Recent Tasks"
-            action={
-              <Button size="small" endIcon={<OpenIcon sx={{ fontSize: 14 }} />} onClick={() => navigate(tasksPath)}>
-                Open Board
-              </Button>
-            }
-          >
-            {recentTasks.length === 0 ? (
-              <EmptyBlock title="No Tasks" cta="Open Board" onClick={() => navigate(tasksPath)} />
-            ) : (
-              <TableContainer sx={{ maxWidth: '100%', overflowX: 'auto' }}>
-                <Table stickyHeader size="small" sx={{ minWidth: 820 }}>
-                  <TableHead>
-                    <TableRow>
-                      {['Task Name', 'Module', 'Priority', 'Status', 'Assignee', 'Progress', 'Due Date', ''].map((c) => (
-                        <TableCell key={c || 'a'}>{c}</TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {pagedRecentTasks.map((t) => (
-                      <TableRow key={t.id} hover sx={{ '&:hover': { bgcolor: 'rgba(79,70,229,0.03)' } }}>
-                        <TableCell sx={{ maxWidth: 220 }}>
-                          <Typography sx={{ fontWeight: 700, fontSize: '0.8rem' }} noWrap>
-                            {t.title}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography sx={{ fontSize: '0.8rem' }}>{t.module || '—'}</Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={t.priority || 'Medium'}
-                            sx={{ height: 22, fontWeight: 700, fontSize: '0.65rem', ...priorityStyle(t.priority) }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={t.status}
-                            sx={{
-                              height: 22,
-                              fontWeight: 700,
-                              fontSize: '0.65rem',
-                              bgcolor: `${STATUS_COLORS[t.status] || '#94A3B8'}22`,
-                              color: STATUS_COLORS[t.status] || '#64748B',
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {t.developer ? (
-                            <Stack
-                              direction="row"
-                              sx={{
-                                alignItems: "center",
-                                gap: 1
-                              }}>
-                              <Avatar sx={{ width: 24, height: 24, fontSize: '0.65rem', bgcolor: t.developer.color }}>
-                                {initials(getDeveloperDisplayName(t.developer))}
-                              </Avatar>
-                              <Typography sx={{ fontSize: '0.8rem' }} noWrap>
-                                {getDeveloperDisplayName(t.developer)}
-                              </Typography>
-                            </Stack>
-                          ) : (
-                            '—'
-                          )}
-                        </TableCell>
-                        <TableCell sx={{ minWidth: 100 }}>
-                          <LinearProgress
-                            variant="determinate"
-                            value={t.progress}
-                            sx={{
-                              height: 6,
-                              borderRadius: 99,
-                              bgcolor: '#E2E8F0',
-                              '& .MuiLinearProgress-bar': {
-                                bgcolor: t.progress >= 100 ? '#22C55E' : '#4F46E5',
-                                borderRadius: 99,
-                              },
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Typography sx={{ fontSize: '0.8rem' }}>{formatShortDate(t.dueDate)}</Typography>
-                        </TableCell>
-                        <TableCell>
-                          <IconButton size="small" onClick={() => navigate(tasksPath)}>
-                            <EditIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
                     ))}
-                  </TableBody>
-                </Table>
-                {recentTasks.length > recentTasksRowsPerPage && (
-                  <TablePagination
-                    component="div"
-                    count={recentTasks.length}
-                    page={recentTasksPage}
-                    onPageChange={(_e, p) => setRecentTasksPage(p)}
-                    rowsPerPage={recentTasksRowsPerPage}
-                    onRowsPerPageChange={(e) => {
-                      setRecentTasksRowsPerPage(parseInt(e.target.value, 10));
-                      setRecentTasksPage(0);
-                    }}
-                    rowsPerPageOptions={[5, 8, 15, 25]}
-                    sx={{ borderTop: '1px solid', borderColor: 'divider' }}
-                  />
-                )}
-              </TableContainer>
-            )}
-          </SectionCard>
-
-          {/* Charts row */}
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' },
-              gap: 3,
-            }}
-          >
-            <SectionCard title="Task Status">
-              {statusLegend.length === 0 ? (
-                <EmptyBlock title="No status data" />
-              ) : (
-                <Box sx={{ height: 240 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={statusLegend}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={58}
-                        outerRadius={84}
-                        paddingAngle={3}
-                      >
-                        {statusLegend.map((entry) => (
-                          <Cell key={entry.name} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-              )}
-              <Stack
-                direction="row"
-                useFlexGap
-                sx={{
-                  gap: 1,
-                  flexWrap: "wrap",
-                  justifyContent: "center"
-                }}>
-                {statusLegend.slice(0, 6).map((s) => (
-                  <Chip
-                    key={s.name}
-                    size="small"
-                    label={`${s.name} ${s.pct}%`}
-                    sx={{ height: 24, fontWeight: 650, bgcolor: `${s.color}18`, color: s.color }}
-                  />
-                ))}
-              </Stack>
-            </SectionCard>
-
-            <SectionCard title="Completion Trend">
-              {timelineData.length === 0 ? (
-                <EmptyBlock title="No trend data" />
-              ) : (
-                <Box sx={{ height: 260 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={timelineData}>
-                      <defs>
-                        <linearGradient id="ovComplete" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#4F46E5" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="#4F46E5" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <RechartsTooltip />
-                      <Area type="monotone" dataKey="completedTasks" stroke="#4F46E5" fill="url(#ovComplete)" strokeWidth={2} />
-                      <Area type="monotone" dataKey="totalTasks" stroke="#94A3B8" fill="transparent" strokeWidth={1.5} strokeDasharray="4 4" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </Box>
-              )}
-            </SectionCard>
-
-            <SectionCard title="Developer Workload" sx={{ gridColumn: { lg: '1 / -1' } }}>
-              {workloadBars.length === 0 ? (
-                <EmptyBlock title="No workload data" />
-              ) : (
-                <Box sx={{ height: 260 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={workloadBars} barGap={4}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <RechartsTooltip />
-                      <Bar dataKey="completed" stackId="a" fill="#22C55E" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="inProgress" stackId="a" fill="#4F46E5" />
-                      <Bar dataKey="upcoming" stackId="a" fill="#CBD5E1" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Box>
+                  </Stack>
+                </>
               )}
             </SectionCard>
           </Box>
 
-          {/* Activity + Info + Deadlines + Files */}
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' },
-              gap: 3,
-            }}
-          >
-            <SectionCard title="Recently Updated">
-              {activity.length === 0 ? (
-                <EmptyBlock title="No Recent Updates" />
+          {/* Bottom lists — 3 columns on large screens */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(3, 1fr)' }, gap: 2 }}>
+            <SectionCard
+              title="Upcoming Deadlines"
+              sx={{ p: 2.5 }}
+              action={
+                <Button size="small" onClick={() => navigate(`${basePath}/tasks`)} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                  View all
+                </Button>
+              }
+            >
+              {upcomingDeadlines.length === 0 ? (
+                <EmptyWidget title="No upcoming deadlines." />
               ) : (
-                <Stack spacing={0} sx={{ position: 'relative', pl: 1 }}>
-                  {activity.map((a, idx) => (
+                <Stack spacing={0.5}>
+                  {upcomingDeadlines.slice(0, 5).map((t) => (
                     <Stack
-                      key={a.id}
+                      key={t.id}
                       direction="row"
-                      sx={{
-                        gap: 1.5,
-                        position: 'relative',
-                        py: 1.25
-                      }}>
-                      {idx < activity.length - 1 && (
-                        <Box
-                          sx={{
-                            position: 'absolute',
-                            left: 15,
-                            top: 40,
-                            bottom: -4,
-                            width: 2,
-                            bgcolor: '#E2E8F0',
-                          }}
-                        />
-                      )}
-                      <Avatar sx={{ width: 32, height: 32, fontSize: '0.7rem', bgcolor: a.color, zIndex: 1 }}>
-                        {initials(a.who)}
+                      alignItems="center"
+                      justifyContent="space-between"
+                      gap={1}
+                      onClick={() => openTask(t)}
+                      sx={{ py: 1, px: 0.5, borderRadius: 1.5, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                    >
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography sx={{ fontWeight: 650, fontSize: '0.85rem' }} noWrap>
+                          {t.title}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>{formatShortDate(t.dueDate)}</Typography>
+                      </Box>
+                      <Chip size="small" label={relativeDeadlineLabel(t.dueDate, today)} sx={{ height: 22, fontWeight: 700, fontSize: '0.65rem', flexShrink: 0, ...deadlinePillSx(t.dueDate, today) }} />
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+            </SectionCard>
+
+            <SectionCard
+              title="Overdue Tasks"
+              sx={{ p: 2.5 }}
+              action={
+                <Button size="small" onClick={() => navigate(`${basePath}/tasks?overdueOnly=1`)} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                  View all
+                </Button>
+              }
+            >
+              {overdueTasks.length === 0 ? (
+                <EmptyWidget title="No overdue tasks" />
+              ) : (
+                <Stack spacing={0.5}>
+                  {overdueTasks.slice(0, 5).map((t) => (
+                    <Stack
+                      key={t.id}
+                      direction="row"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      gap={1}
+                      onClick={() => openTask(t)}
+                      sx={{ py: 1, px: 0.5, borderRadius: 1.5, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                    >
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography sx={{ fontWeight: 650, fontSize: '0.85rem' }} noWrap>
+                          {t.title}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>{formatShortDate(t.dueDate)}</Typography>
+                      </Box>
+                      <Chip size="small" label={`${t.lateDays}d late`} sx={{ height: 22, fontWeight: 700, fontSize: '0.65rem', flexShrink: 0, bgcolor: '#FEE2E2', color: '#B91C1C' }} />
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+            </SectionCard>
+
+            <SectionCard title="Recent Activity" sx={{ p: 2.5 }}>
+              {recentActivity.length === 0 ? (
+                <EmptyWidget title="No recent activity." />
+              ) : (
+                <Stack spacing={0}>
+                  {recentActivity.slice(0, 5).map((a) => (
+                    <Stack key={a.id} direction="row" gap={1.25} sx={{ py: 1.1 }}>
+                      <Avatar sx={{ width: 30, height: 30, fontSize: '0.65rem', bgcolor: a.color }}>
+                        {(a.who || '?').charAt(0).toUpperCase()}
                       </Avatar>
                       <Box sx={{ minWidth: 0, flex: 1 }}>
-                        <Typography sx={{ fontSize: '0.8rem', lineHeight: 1.45 }}>
+                        <Typography sx={{ fontSize: '0.78rem', lineHeight: 1.4 }}>
                           <Box component="span" sx={{ fontWeight: 750 }}>{a.who}</Box>
                           {' '}
-                          <Box component="span" sx={{ color: a.eventColor, fontWeight: 650 }}>{a.action}</Box>
+                          {a.action}
                           {' '}
                           <Box component="span" sx={{ fontWeight: 600 }}>&ldquo;{a.title}&rdquo;</Box>
                         </Typography>
-                        <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', mt: 0.25 }}>
-                          {a.when}
-                        </Typography>
+                        <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary' }}>{a.when}</Typography>
                       </Box>
                     </Stack>
                   ))}
                 </Stack>
               )}
             </SectionCard>
-
-            <Stack spacing={3}>
-              <SectionCard
-                title="Project Information"
-                action={
-                  !isClient && (
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<CalendarIcon />}
-                      onClick={() => setDateDialogOpen(true)}
-                    >
-                      Update Date & Note
-                    </Button>
-                  )
-                }
-              >
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                  {[
-                    ['Client', project?.clientName || '—'],
-                    ['Manager', project?.manager?.name || '—'],
-                    ['Created', formatShortDate(project?.createdAt)],
-                    ['Updated', timeAgo(project?.lastUpdated) || '—'],
-                    ['Start Date', formatShortDate(project?.startDate)],
-                    ['Original Delivery', formatShortDate(project?.originalDeliveryDate || project?.dueDate)],
-                    ['Revised Date', project?.revisedDeliveryDate ? formatShortDate(project.revisedDeliveryDate) : '—'],
-                    [
-                      'Project Status',
-                      project?.isProjectOverdue ? (
-                        <Chip
-                          icon={<OverdueIcon sx={{ fontSize: '13px !important', color: '#DC2626 !important' }} />}
-                          label={`${project.projectOverdueDays}d Overdue`}
-                          size="small"
-                          sx={{ bgcolor: '#FEF2F2', color: '#B91C1C', fontWeight: 800, height: 20, fontSize: '0.7rem' }}
-                        />
-                      ) : (
-                        <Chip
-                          label="On Track"
-                          size="small"
-                          sx={{ bgcolor: '#F0FDF4', color: '#15803D', fontWeight: 700, height: 20, fontSize: '0.7rem' }}
-                        />
-                      ),
-                    ],
-                    ['Est. Hours', `${metrics.estimated || 0}h`],
-                    ['Actual Hours', `${metrics.actual || 0}h`],
-                  ].map(([label, value]) => (
-                    <Box key={label}>
-                      <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', mb: 0.35 }}>
-                        {label.toUpperCase()}
-                      </Typography>
-                      {typeof value === 'string' || typeof value === 'number' ? (
-                        <Typography sx={{ fontSize: '0.85rem', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {value}
-                        </Typography>
-                      ) : (
-                        value
-                      )}
-                    </Box>
-                  ))}
-                </Box>
-                {project?.deliveryNotes && (
-                  <>
-                    <Divider sx={{ my: 1.5 }} />
-                    <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: 'text.secondary', mb: 0.5 }}>
-                      REVISION / EXTENSION NOTE
-                    </Typography>
-                    <Typography sx={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'text.primary', bgcolor: 'action.hover', p: 1.25, borderRadius: 1.5 }}>
-                      &ldquo;{project.deliveryNotes}&rdquo;
-                    </Typography>
-                  </>
-                )}
-                {tags.length > 0 && (
-                  <>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', mb: 1 }}>
-                      TECHNOLOGY / TAGS
-                    </Typography>
-                    <Stack
-                      direction="row"
-                      useFlexGap
-                      sx={{
-                        gap: 0.75,
-                        flexWrap: "wrap"
-                      }}>
-                      {tags.map((t) => (
-                        <Chip key={t} label={t} size="small" sx={{ fontWeight: 650, bgcolor: '#EEF2FF', color: '#4338CA' }} />
-                      ))}
-                    </Stack>
-                  </>
-                )}
-              </SectionCard>
-
-              <SectionCard title="Upcoming Deadlines">
-                {[
-                  { key: 'overdue', label: 'Overdue', color: '#EF4444', items: deadlines.overdue },
-                  { key: 'today', label: 'Due Today', color: '#F59E0B', items: deadlines.today },
-                  { key: 'tomorrow', label: 'Due Tomorrow', color: '#3B82F6', items: deadlines.tomorrow },
-                  { key: 'week', label: 'Next Week', color: '#64748B', items: deadlines.week },
-                ].map((bucket) =>
-                  bucket.items.length === 0 ? null : (
-                    <Box key={bucket.key} sx={{ mb: 1.5 }}>
-                      <Typography sx={{ fontSize: '0.7rem', fontWeight: 750, color: bucket.color, mb: 0.75 }}>
-                        {bucket.label} ({bucket.items.length})
-                      </Typography>
-                      {bucket.items.slice(0, 3).map((t) => (
-                        <Stack
-                          key={t.id}
-                          direction="row"
-                          onClick={() => navigate(tasksPath)}
-                          sx={{
-                            justifyContent: "space-between",
-                            gap: 1,
-                            py: 0.75,
-                            px: 1,
-                            mb: 0.5,
-                            borderRadius: 1.5,
-                            bgcolor: '#F8FAFC',
-                            cursor: 'pointer',
-                            '&:hover': { bgcolor: '#EEF2FF' }
-                          }}>
-                          <Typography sx={{ fontSize: '0.8rem', fontWeight: 650 }} noWrap>
-                            {t.title}
-                          </Typography>
-                          <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', flexShrink: 0 }}>
-                            {formatShortDate(t.dueDate)}
-                          </Typography>
-                        </Stack>
-                      ))}
-                    </Box>
-                  )
-                )}
-                {!deadlines.overdue.length &&
-                  !deadlines.today.length &&
-                  !deadlines.tomorrow.length &&
-                  !deadlines.week.length && (
-                    <EmptyBlock title="No upcoming deadlines" cta="Calendar" onClick={() => navigate(calendarPath)} />
-                  )}
-              </SectionCard>
-            </Stack>
           </Box>
 
+          <Stack direction="row" flexWrap="wrap" gap={1}>
+            <Button variant="outlined" size="small" startIcon={<BoardIcon />} onClick={() => goTasks()} sx={{ textTransform: 'none' }}>
+              View Task Board
+            </Button>
+            <Button variant="outlined" size="small" startIcon={<TimelineIcon />} onClick={() => navigate(`${basePath}/timeline`)} sx={{ textTransform: 'none' }}>
+              View Timeline
+            </Button>
+            <Button variant="outlined" size="small" startIcon={<CalendarIcon />} onClick={() => navigate(`${basePath}/calendar`)} sx={{ textTransform: 'none' }}>
+              Open Calendar
+            </Button>
+          </Stack>
         </Stack>
 
-        {/* RIGHT SIDEBAR */}
-        <Stack
-          spacing={2.5}
-          sx={{
-            display: { xs: 'none', xl: 'flex' },
-            position: 'sticky',
-            top: 88,
-          }}
-        >
-          {phases.length > 0 && (
-            <SectionCard title="Next Milestone">
-              <Typography sx={{ fontWeight: 750, mb: 0.5 }}>{nextMilestone?.name || '—'}</Typography>
-              <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: 1.5 }}>
-                {nextMilestone?.done ? 'Completed' : `${nextMilestone?.pct || 0}% complete`}
-              </Typography>
-              <LinearProgress
-                variant="determinate"
-                value={nextMilestone?.pct || 0}
-                sx={{
-                  height: 8,
-                  borderRadius: 99,
-                  bgcolor: '#E2E8F0',
-                  '& .MuiLinearProgress-bar': { bgcolor: '#4F46E5', borderRadius: 99 },
-                }}
-              />
-            </SectionCard>
-          )}
-
-          <SectionCard title="Time Tracking">
-            {metrics.estimated === 0 && metrics.actual === 0 ? (
-              <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>
-                No hours logged
-              </Typography>
-            ) : (
-              <Stack spacing={1.25}>
-                <Stack direction="row" sx={{
-                  justifyContent: "space-between"
-                }}>
-                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Estimated</Typography>
-                  <Typography sx={{ fontWeight: 750, fontSize: '0.85rem' }}>{metrics.estimated || 0}h</Typography>
-                </Stack>
-                <Stack direction="row" sx={{
-                  justifyContent: "space-between"
-                }}>
-                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Actual</Typography>
-                  <Typography sx={{ fontWeight: 750, fontSize: '0.85rem' }}>{metrics.actual || 0}h</Typography>
-                </Stack>
-                <LinearProgress
-                  variant="determinate"
-                  value={timeUsage}
-                  sx={{
-                    height: 8,
-                    borderRadius: 99,
-                    bgcolor: '#E2E8F0',
-                    '& .MuiLinearProgress-bar': { bgcolor: '#0EA5E9', borderRadius: 99 },
-                  }}
-                />
-              </Stack>
-            )}
-          </SectionCard>
-
-          <SectionCard title="Recent Contributors">
-            {teamCards.length === 0 ? (
-              <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No contributors yet</Typography>
-            ) : (
-              <>
-                <AvatarGroup max={6} sx={{ mb: 1.5, justifyContent: 'flex-start', '& .MuiAvatar-root': { width: 32, height: 32, fontSize: '0.75rem', fontWeight: 700 } }}>
-                  {teamCards.map((m) => (
-                    <Tooltip key={m.id} title={m.name}>
-                      <Avatar sx={{ bgcolor: m.color }}>{initials(m.name)}</Avatar>
-                    </Tooltip>
-                  ))}
-                </AvatarGroup>
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                  {teamCards.length} active on this project
-                </Typography>
-              </>
-            )}
-          </SectionCard>
-
-          <SectionCard title="Notifications">
-            <Stack spacing={1}>
-              {metrics.overdue > 0 && (
-                <Stack
-                  direction="row"
-                  sx={{
-                    gap: 1,
-                    alignItems: "flex-start"
-                  }}>
-                  <OverdueIcon sx={{ fontSize: 16, color: '#EF4444', mt: 0.25 }} />
-                  <Typography sx={{ fontSize: '0.8rem' }}>{metrics.overdue} overdue task(s)</Typography>
-                </Stack>
-              )}
-              {metrics.blocked > 0 && (
-                <Stack
-                  direction="row"
-                  sx={{
-                    gap: 1,
-                    alignItems: "flex-start"
-                  }}>
-                  <IssuesIcon sx={{ fontSize: 16, color: '#E11D48', mt: 0.25 }} />
-                  <Typography sx={{ fontSize: '0.8rem' }}>{metrics.blocked} open issue(s)</Typography>
-                </Stack>
-              )}
-              {daysRemaining != null && daysRemaining <= 14 && daysRemaining >= 0 && (
-                <Stack
-                  direction="row"
-                  sx={{
-                    gap: 1,
-                    alignItems: "flex-start"
-                  }}>
-                  <ScheduleIcon sx={{ fontSize: 16, color: '#F59E0B', mt: 0.25 }} />
-                  <Typography sx={{ fontSize: '0.8rem' }}>Due in {daysRemaining} day(s)</Typography>
-                </Stack>
-              )}
-              {metrics.overdue === 0 && metrics.blocked === 0 && (
-                <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>You&apos;re all caught up.</Typography>
-              )}
-            </Stack>
-          </SectionCard>
-        </Stack>
-      </Box>
-      {!isClient && (
-        <Fab
-          color="primary"
-          aria-label="Create task"
-          onClick={() => navigate(tasksPath)}
-          sx={{
-            display: { xs: 'flex', md: 'none' },
-            position: 'fixed',
-            bottom: 24,
-            right: 24,
-            background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
-          }}
-        >
-          <AddIcon />
-        </Fab>
-      )}
-      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
-        <MenuItem
-          onClick={() => {
-            navigate(tasksPath);
-            setMenuAnchor(null);
-          }}
-        >
-          <BoardIcon fontSize="small" sx={{ mr: 1.5 }} /> Open Board
+      {/* Menus */}
+      <Menu anchorEl={shareMenuAnchor} open={Boolean(shareMenuAnchor)} onClose={() => setShareMenuAnchor(null)}>
+        <MenuItem onClick={handleCopyClientLink}>
+          <CopyIcon fontSize="small" sx={{ mr: 1.5 }} /> Copy Client Link
         </MenuItem>
         <MenuItem
           onClick={() => {
-            navigate(calendarPath);
-            setMenuAnchor(null);
+            setShareMenuAnchor(null);
+            setShareOpen(true);
           }}
         >
-          <CalendarIcon fontSize="small" sx={{ mr: 1.5 }} /> Calendar
+          <ShareIcon fontSize="small" sx={{ mr: 1.5 }} /> Share Client Portal
         </MenuItem>
-        {!isClient && (
-          <Can permission="csv.upload">
-            <MenuItem
-              onClick={() => {
-                navigate(`/projects/upload?projectId=${projectId}`);
-                setMenuAnchor(null);
-              }}
-            >
-              <UploadIcon fontSize="small" sx={{ mr: 1.5 }} /> Import CSV
-            </MenuItem>
-          </Can>
-        )}
         <MenuItem
           onClick={() => {
-            load();
-            setMenuAnchor(null);
+            setShareMenuAnchor(null);
+            setShareOpen(true);
           }}
         >
-          Refresh
+          <LinkIcon fontSize="small" sx={{ mr: 1.5 }} /> Manage Share Link
         </MenuItem>
       </Menu>
+
+      <Menu anchorEl={exportMenuAnchor} open={Boolean(exportMenuAnchor)} onClose={() => setExportMenuAnchor(null)}>
+        <MenuItem
+          onClick={() => {
+            setExportMenuAnchor(null);
+            window.alert('PDF export coming soon');
+          }}
+        >
+          Export PDF
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setExportMenuAnchor(null);
+            window.alert('Excel export coming soon');
+          }}
+        >
+          Export Excel
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setExportMenuAnchor(null);
+            exportTasksCsv(tasks, project?.name || 'project');
+          }}
+        >
+          Export CSV (tasks)
+        </MenuItem>
+      </Menu>
+
+      <Menu anchorEl={moreMenuAnchor} open={Boolean(moreMenuAnchor)} onClose={() => setMoreMenuAnchor(null)}>
+        <MenuItem onClick={() => { navigate(`${basePath}/settings`); setMoreMenuAnchor(null); }}>
+          <OpenIcon fontSize="small" sx={{ mr: 1.5 }} /> Project Settings
+        </MenuItem>
+        <Can permission="csv.upload">
+          <MenuItem onClick={() => { navigate(`/projects/upload?projectId=${projectId}`); setMoreMenuAnchor(null); }}>
+            Import CSV
+          </MenuItem>
+        </Can>
+        <MenuItem onClick={() => { loadAll(); setMoreMenuAnchor(null); }}>
+          <RefreshIcon fontSize="small" sx={{ mr: 1.5 }} /> Refresh
+        </MenuItem>
+      </Menu>
+
       <ShareProjectDialog open={shareOpen} onClose={() => setShareOpen(false)} project={project} />
-      <UpdateDeliveryDateDialog
-        open={dateDialogOpen}
-        onClose={() => setDateDialogOpen(false)}
-        project={project}
-        onUpdated={load}
+      <DelayAnalysisDrawer open={delayDrawerOpen} onClose={() => setDelayDrawerOpen(false)} analysis={delayAnalysis} />
+      <TaskDetailsDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        task={selectedTask}
+        developers={developers}
+        onTaskUpdated={loadTasks}
       />
     </PageContainer>
   );

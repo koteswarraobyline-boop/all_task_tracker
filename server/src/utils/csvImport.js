@@ -15,7 +15,6 @@ const VALID_STATUSES = [
   'Upcoming',
   'Assigned',
   'In Development',
-  'Code Review',
   'Testing',
   'Completed',
   'Blocked',
@@ -26,7 +25,6 @@ const STATUS_ALIASES = {
   upcoming: 'Upcoming',
   assigned: 'Assigned',
   'in development': 'In Development',
-  'code review': 'Code Review',
   testing: 'Testing',
   completed: 'Completed',
   blocked: 'Blocked',
@@ -48,8 +46,9 @@ const STATUS_ALIASES = {
   doing: 'In Development',
   working: 'In Development',
   development: 'In Development',
-  review: 'Code Review',
-  'in review': 'Code Review',
+  review: 'Testing',
+  'code review': 'Testing',
+  'in review': 'Testing',
   qa: 'Testing',
   done: 'Completed',
   finished: 'Completed',
@@ -150,6 +149,7 @@ function normalizeStatus(rawStatus, hasAssignee, rowNum, errors) {
     return hasAssignee ? 'Assigned' : 'Upcoming';
   }
   const normalized = rawStatus.toLowerCase().trim().replace(/\s+/g, ' ');
+  if (normalized === 'code review') return 'Testing';
   const matched =
     STATUS_ALIASES[normalized] ||
     VALID_STATUSES.find((s) => s.toLowerCase() === normalized);
@@ -266,7 +266,6 @@ function parseFlexibleRows(rawRows) {
     const tags = cell(row, headerIndex, 'Tags', 'Labels');
     const dependencies = cell(row, headerIndex, 'Dependencies', 'Depends On', 'Blocked By');
     const phase = cell(row, headerIndex, 'Phase', 'Stage');
-    const week = cell(row, headerIndex, 'Week', 'Sprint');
     const feature = cell(row, headerIndex, 'Feature');
     const remarks = cell(row, headerIndex, 'Remarks', 'Notes', 'Comment');
 
@@ -316,7 +315,6 @@ function parseFlexibleRows(rawRows) {
       actualHours,
       remarks: remarks || null,
       phase: phase || null,
-      week: week || null,
       estDays: null,
       dependencies: dependencies || null,
       tags: tags || null,

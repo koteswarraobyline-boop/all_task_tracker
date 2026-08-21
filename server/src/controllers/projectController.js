@@ -1,7 +1,7 @@
 const fs = require('fs');
 const csv = require('csv-parser');
 const { sequelize } = require('../config/database');
-const { Project, Task, Developer } = require('../models');
+const { Project, Task, Developer, ClientAccessRecord } = require('../models');
 const {
   detectFlexibleFromRows,
   parseFlexibleRows,
@@ -9,6 +9,8 @@ const {
   parseDate,
   parseNumber,
 } = require('../utils/csvImport');
+const { enrichProjectRecord, analyzeProjectDelay } = require('../services/projectEnrichmentService');
+const { syncTargetOnRevisedUpdate } = require('../services/deliveryDateService');
 
 // Helper to generate a random hex color
 function getRandomColor() {
@@ -41,162 +43,7 @@ exports.getAllProjects = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    const priorityRank = (p) => {
-      const v = String(p || '').toLowerCase();
-      if (['high', 'p0', 'p1', 'critical', 'urgent'].includes(v)) return 3;
-      if (['medium', 'p2', 'normal'].includes(v)) return 2;
-      if (['low', 'p3'].includes(v)) return 1;
-      return 0;
-    };
-
-    const projectData = projects.map(proj => {
-      const allRows = proj.tasks || [];
-      const modules = allRows.filter((t) => t.recordType === 'module');
-      const tasks = allRows.filter((t) => t.recordType !== 'module');
-      const totalTasks = tasks.length;
-      
-      const completed = tasks.filter(t => t.status === 'Completed').length;
-      const inDevelopment = tasks.filter(t => t.status === 'In Development').length;
-      const blocked = tasks.filter(t => t.status === 'Blocked').length;
-      const upcoming = tasks.filter(t => t.status === 'Upcoming').length;
-      const onHold = tasks.filter(t => t.status === 'On Hold').length;
-      // Pending is anything else (Assigned, Code Review, Testing)
-      const pending = tasks.filter(t => 
-        ['Assigned', 'Code Review', 'Testing'].includes(t.status)
-      ).length;
-
-      // Last updated is the latest updatedAt of any task, or project's updatedAt if no tasks
-      let lastUpdated = proj.updatedAt;
-      if (tasks.length > 0) {
-        const dates = tasks.map(t => new Date(t.updatedAt).getTime());
-        lastUpdated = new Date(Math.max(...dates));
-      }
-
-      const startDates = tasks.map((t) => t.startDate).filter(Boolean).sort();
-      const dueDates = tasks.map((t) => t.dueDate).filter(Boolean).sort();
-      const startDate = startDates[0] || (proj.createdAt ? String(proj.createdAt).slice(0, 10) : null);
-      const dueDate = dueDates.length ? dueDates[dueDates.length - 1] : null;
-
-      const memberMap = {};
-      const assignCount = {};
-      tasks.forEach((t) => {
-        if (t.developer && t.developer.id) {
-          memberMap[t.developer.id] = {
-            id: t.developer.id,
-            name: t.developer.name,
-            color: t.developer.color,
-          };
-          assignCount[t.developer.id] = (assignCount[t.developer.id] || 0) + 1;
-        }
-      });
-      const members = Object.values(memberMap);
-      const topDevId = Object.keys(assignCount).sort((a, b) => assignCount[b] - assignCount[a])[0];
-      const manager = topDevId ? memberMap[topDevId] : null;
-
-      let status = 'Active';
-      if (totalTasks > 0 && completed === totalTasks) status = 'Completed';
-      else if (blocked > 0) status = 'Delayed';
-      else if (onHold > 0 && inDevelopment === 0) status = 'On Hold';
-
-      const daysSinceUpdate = lastUpdated
-        ? Math.floor((Date.now() - new Date(lastUpdated).getTime()) / 86400000)
-        : 0;
-      const archived = status === 'Completed' && daysSinceUpdate >= 60;
-
-      const progress = totalTasks > 0 ? Math.round((completed / totalTasks) * 100) : 0;
-
-      let bestPriority = null;
-      let bestRank = -1;
-      tasks.forEach((t) => {
-        if (t.status === 'Completed') return;
-        const r = priorityRank(t.priority);
-        if (r > bestRank) {
-          bestRank = r;
-          bestPriority = t.priority;
-        }
-      });
-      if (!bestPriority) {
-        const any = tasks.find((t) => t.priority);
-        bestPriority = any?.priority || 'Medium';
-      }
-
-      const estimatedHours = tasks.reduce((s, t) => s + (Number(t.estimatedHours) || 0), 0);
-      const actualHours = tasks.reduce((s, t) => s + (Number(t.actualHours) || 0), 0);
-
-      const moduleSet = new Set();
-      [...tasks, ...modules].forEach((t) => {
-        if (t.module) moduleSet.add(String(t.module).trim());
-      });
-
-      const tagSet = new Set();
-      tasks.forEach((t) => {
-        if (!t.tags) return;
-        String(t.tags)
-          .split(/[,|]/)
-          .map((x) => x.trim())
-          .filter(Boolean)
-          .forEach((tag) => tagSet.add(tag));
-      });
-      const tags = Array.from(tagSet).slice(0, 8);
-
-      const description =
-        tasks.find((t) => t.description)?.description ||
-        modules.find((t) => t.description)?.description ||
-        null;
-
-      const originalDeliveryDate = proj.originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
-      const revisedDeliveryDate = proj.revisedDeliveryDate || null;
-      const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
-
-      let projectOverdueDays = 0;
-      let isProjectOverdue = false;
-      const isProjectExtended = Boolean(proj.revisedDeliveryDate);
-
-      if (effectiveDueDate && status !== 'Completed') {
-        const targetTime = new Date(effectiveDueDate).getTime();
-        const nowTime = new Date().setHours(0, 0, 0, 0);
-        if (!isNaN(targetTime) && targetTime < nowTime) {
-          projectOverdueDays = Math.ceil((nowTime - targetTime) / (1000 * 60 * 60 * 24));
-          isProjectOverdue = true;
-        }
-      }
-
-      return {
-        id: proj.id,
-        name: proj.name,
-        clientName: proj.clientName,
-        description: description ? String(description).slice(0, 160) : null,
-        totalTasks,
-        completed,
-        remaining: Math.max(0, totalTasks - completed),
-        inDevelopment,
-        pending,
-        blocked,
-        upcoming,
-        onHold,
-        moduleCount: moduleSet.size || modules.length,
-        estimatedHours: Math.round(estimatedHours * 10) / 10,
-        actualHours: Math.round(actualHours * 10) / 10,
-        priority: bestPriority,
-        tags,
-        manager,
-        lastUpdated,
-        createdAt: proj.createdAt,
-        startDate,
-        dueDate: effectiveDueDate,
-        originalDeliveryDate,
-        revisedDeliveryDate,
-        effectiveDueDate,
-        deliveryNotes: proj.deliveryNotes || null,
-        projectOverdueDays,
-        isProjectOverdue,
-        isProjectExtended,
-        members,
-        status,
-        archived,
-        progress,
-      };
-    });
+    const projectData = projects.map((proj) => enrichProjectRecord(proj));
 
     res.json(projectData);
   } catch (error) {
@@ -224,6 +71,50 @@ exports.deleteProject = async (req, res) => {
     await transaction.rollback();
     console.error('Error deleting project:', error);
     res.status(500).json({ error: 'Failed to delete project' });
+  }
+};
+
+// PUT /projects/:id
+exports.updateProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, clientName, originalDeliveryDate, revisedDeliveryDate, deliveryNotes } = req.body;
+
+    const project = await Project.findByPk(id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const updates = {};
+    if (name !== undefined && name.trim()) updates.name = name.trim();
+    if (clientName !== undefined) updates.clientName = clientName.trim() || null;
+    if (originalDeliveryDate !== undefined) updates.originalDeliveryDate = originalDeliveryDate || null;
+    if (revisedDeliveryDate !== undefined) updates.revisedDeliveryDate = revisedDeliveryDate || null;
+    if (deliveryNotes !== undefined) updates.deliveryNotes = deliveryNotes || null;
+
+    await project.update(updates);
+
+    if (clientName !== undefined && ClientAccessRecord) {
+      await ClientAccessRecord.update(
+        { clientName: clientName.trim() || 'Client' },
+        { where: { projectId: project.id } }
+      ).catch((err) => console.error('Error updating ClientAccessRecord clientName:', err));
+    }
+
+    res.json({
+      message: 'Project updated successfully',
+      project: {
+        id: project.id,
+        name: project.name,
+        clientName: project.clientName,
+        originalDeliveryDate: project.originalDeliveryDate,
+        revisedDeliveryDate: project.revisedDeliveryDate,
+        deliveryNotes: project.deliveryNotes,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating project:', error);
+    res.status(500).json({ error: 'Failed to update project' });
   }
 };
 
@@ -300,7 +191,6 @@ exports.uploadProject = async (req, res) => {
           const remarks = row[columnMap.remarks]?.trim() || '';
           const devName = row[columnMap.assignedDeveloper]?.trim() || '';
           const phase = row[columnMap.phase]?.trim() || '';
-          const week = row[columnMap.week]?.trim() || '';
           const rawEstDays = row[columnMap.estDays]?.trim() || '';
           const dependencies = row[columnMap.dependencies]?.trim() || '';
 
@@ -345,7 +235,6 @@ exports.uploadProject = async (req, res) => {
             remarks,
             devName,
             phase,
-            week,
             estDays: rawEstDays && !isNaN(parseFloat(rawEstDays)) ? parseFloat(rawEstDays) : null,
             dependencies,
             tags: null,
@@ -383,22 +272,74 @@ exports.uploadProject = async (req, res) => {
             return res.status(404).json({ error: 'Project not found' });
           }
 
-          const existingIds = await Task.findAll({
+          const existingTasks = await Task.findAll({
             where: { projectId: project.id },
-            attributes: ['taskId'],
+            attributes: ['taskId', 'module', 'recordType'],
             transaction,
           });
-          const existingSet = new Set(existingIds.map((t) => t.taskId));
-          const conflicts = mappedTasks.filter((t) => existingSet.has(t.taskId));
-          if (conflicts.length > 0) {
-            await transaction.rollback();
-            return res.status(400).json({
-              error: 'Validation failed',
-              details: conflicts.slice(0, 50).map(
-                (t) => `Row ${t.rowNum}: Task ID '${t.taskId}' already exists in this project.`
-              ),
-            });
-          }
+
+          const existingSet = new Set(existingTasks.map((t) => t.taskId).filter(Boolean));
+
+          let maxTaskNum = 0;
+          let maxModuleNum = 0;
+
+          existingTasks.forEach((t) => {
+            if (t.taskId) {
+              const matchT = t.taskId.match(/^T-(\d+)$/i) || t.taskId.match(/(\d+)/);
+              if (matchT) {
+                const num = parseInt(matchT[1], 10);
+                if (!isNaN(num) && num > maxTaskNum) maxTaskNum = num;
+              }
+              const matchM = t.taskId.match(/^M-(\d+)$/i);
+              if (matchM) {
+                const num = parseInt(matchM[1], 10);
+                if (!isNaN(num) && num > maxModuleNum) maxModuleNum = num;
+              }
+            }
+            if (t.module) {
+              const matchM = String(t.module).match(/^M-(\d+)$/i);
+              if (matchM) {
+                const num = parseInt(matchM[1], 10);
+                if (!isNaN(num) && num > maxModuleNum) maxModuleNum = num;
+              }
+            }
+          });
+
+          const idMap = new Map();
+
+          // 1. Remap modules first
+          mappedTasks.forEach((t) => {
+            if (t.recordType === 'module') {
+              if (existingSet.has(t.taskId) || !t.taskId) {
+                maxModuleNum++;
+                const newId = `M-${maxModuleNum}`;
+                if (t.taskId) idMap.set(t.taskId, newId);
+                t.taskId = newId;
+              }
+            }
+          });
+
+          // 2. Remap tasks
+          mappedTasks.forEach((t) => {
+            if (t.recordType !== 'module') {
+              if (existingSet.has(t.taskId) || !t.taskId) {
+                maxTaskNum++;
+                const newId = `T-${maxTaskNum}`;
+                if (t.taskId) idMap.set(t.taskId, newId);
+                t.taskId = newId;
+              }
+            }
+          });
+
+          // 3. Update parentId and module fields for mappedTasks using idMap
+          mappedTasks.forEach((t) => {
+            if (t.parentId && idMap.has(t.parentId)) {
+              t.parentId = idMap.get(t.parentId);
+            }
+            if (t.module && idMap.has(t.module)) {
+              t.module = idMap.get(t.module);
+            }
+          });
         } else {
           // Create project
           project = await Project.create({
@@ -480,7 +421,6 @@ exports.uploadProject = async (req, res) => {
           actualHours: task.actualHours,
           remarks: task.remarks || null,
           phase: task.phase || null,
-          week: task.week || null,
           estDays: task.estDays,
           dependencies: task.dependencies || null,
           tags: task.tags || null,
@@ -517,11 +457,40 @@ exports.uploadProject = async (req, res) => {
     });
 };
 
+// GET /projects/:id/delay-analysis
+exports.getProjectDelayAnalysis = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const project = await Project.findByPk(id, {
+      include: [{
+        model: Task,
+        as: 'tasks',
+        include: [{
+          model: Developer,
+          as: 'developer',
+          attributes: ['id', 'name', 'color'],
+          required: false,
+        }],
+      }],
+    });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const analysis = analyzeProjectDelay(project, project.tasks || []);
+    return res.json(analysis);
+  } catch (error) {
+    console.error('Error fetching delay analysis:', error);
+    return res.status(500).json({ error: 'Failed to fetch delay analysis' });
+  }
+};
+
 // PUT /projects/:id/delivery-date
 exports.updateProjectDeliveryDate = async (req, res) => {
   try {
     const { id } = req.params;
-    const { originalDeliveryDate, revisedDeliveryDate, deliveryNotes } = req.body;
+    const { originalDeliveryDate, revisedDeliveryDate, deliveryNotes, targetDeliveryDate } = req.body;
 
     const project = await Project.findByPk(id);
     if (!project) {
@@ -531,7 +500,9 @@ exports.updateProjectDeliveryDate = async (req, res) => {
     const updates = {};
     if (originalDeliveryDate !== undefined) updates.originalDeliveryDate = originalDeliveryDate || null;
     if (revisedDeliveryDate !== undefined) updates.revisedDeliveryDate = revisedDeliveryDate || null;
+    if (targetDeliveryDate !== undefined) updates.targetDeliveryDate = targetDeliveryDate || null;
     if (deliveryNotes !== undefined) updates.deliveryNotes = deliveryNotes || null;
+    syncTargetOnRevisedUpdate(updates);
 
     await project.update(updates);
 
@@ -542,6 +513,7 @@ exports.updateProjectDeliveryDate = async (req, res) => {
         name: project.name,
         originalDeliveryDate: project.originalDeliveryDate,
         revisedDeliveryDate: project.revisedDeliveryDate,
+        targetDeliveryDate: project.targetDeliveryDate,
         deliveryNotes: project.deliveryNotes,
       },
     });

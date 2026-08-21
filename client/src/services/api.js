@@ -70,6 +70,11 @@ export const api = {
     return response.data;
   },
 
+  updateProject: async (id, data) => {
+    const response = await apiClient.put(`/projects/${id}`, data);
+    return response.data;
+  },
+
   deleteProject: async (id) => {
     const response = await apiClient.delete(`/projects/${id}`);
     return response.data;
@@ -77,6 +82,11 @@ export const api = {
 
   updateProjectDeliveryDate: async (id, data) => {
     const response = await apiClient.put(`/projects/${id}/delivery-date`, data);
+    return response.data;
+  },
+
+  getProjectDelayAnalysis: async (projectId) => {
+    const response = await apiClient.get(`/projects/${projectId}/delay-analysis`);
     return response.data;
   },
 
@@ -93,6 +103,11 @@ export const api = {
 
   updateTask: async (taskId, data) => {
     const response = await apiClient.put(`/tasks/${taskId}`, data);
+    return response.data;
+  },
+
+  deleteTask: async (taskId) => {
+    const response = await apiClient.delete(`/tasks/${taskId}`);
     return response.data;
   },
 
@@ -120,6 +135,11 @@ export const api = {
   // Dashboard
   getProjectDashboard: async (projectId) => {
     const response = await apiClient.get(`/dashboard/${projectId}`);
+    return response.data;
+  },
+
+  getGlobalDashboard: async () => {
+    const response = await apiClient.get('/dashboard/global');
     return response.data;
   },
 

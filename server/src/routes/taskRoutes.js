@@ -12,4 +12,7 @@ router.post('/projects/:id/tasks', authMiddleware, taskController.createTask);
 // PUT /tasks/:id
 router.put('/tasks/:id', authMiddleware, taskController.updateTask);
 
+// DELETE /tasks/:id
+router.delete('/tasks/:id', authMiddleware, taskController.deleteTask);
+
 module.exports = router;

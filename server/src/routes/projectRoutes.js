@@ -36,6 +36,8 @@ const upload = multer({
 });
 
 router.get('/', authMiddleware, projectController.getAllProjects);
+router.get('/:id/delay-analysis', authMiddleware, projectController.getProjectDelayAnalysis);
+router.put('/:id', authMiddleware, projectController.updateProject);
 router.delete('/:id', authMiddleware, projectController.deleteProject);
 router.put('/:id/delivery-date', authMiddleware, projectController.updateProjectDeliveryDate);
 router.post('/upload', authMiddleware, upload.single('file'), projectController.uploadProject);

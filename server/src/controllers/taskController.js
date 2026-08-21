@@ -156,26 +156,27 @@ exports.updateTask = async (req, res) => {
 
     if (status !== undefined) {
       const validStatuses = [
-        'Upcoming', 'Assigned', 'In Development', 'Code Review',
+        'Upcoming', 'Assigned', 'In Development',
         'Testing', 'Completed', 'Blocked', 'On Hold'
       ];
-      if (status && !validStatuses.includes(status)) {
+      let nextStatus = status;
+      if (nextStatus === 'Code Review') nextStatus = 'Testing';
+      if (nextStatus && !validStatuses.includes(nextStatus)) {
         return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
       }
-      updates.status = status;
+      updates.status = nextStatus;
       // Keep Progress % in sync with workflow status unless caller sets it explicitly
       if (req.body.progressPercent === undefined) {
         const statusProgress = {
           Upcoming: 0,
           Assigned: 15,
           'In Development': 40,
-          'Code Review': 60,
           Testing: 80,
           Completed: 100,
           Blocked: 25,
           'On Hold': 20,
         };
-        updates.progressPercent = statusProgress[status] ?? 0;
+        updates.progressPercent = statusProgress[nextStatus] ?? 0;
       }
     }
 
@@ -280,10 +281,11 @@ exports.createTask = async (req, res) => {
     }
 
     const validStatuses = [
-      'Upcoming', 'Assigned', 'In Development', 'Code Review',
+      'Upcoming', 'Assigned', 'In Development',
       'Testing', 'Completed', 'Blocked', 'On Hold',
     ];
     let resolvedStatus = status || 'Upcoming';
+    if (resolvedStatus === 'Code Review') resolvedStatus = 'Testing';
     if (!validStatuses.includes(resolvedStatus)) {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
@@ -336,7 +338,6 @@ exports.createTask = async (req, res) => {
               Upcoming: 0,
               Assigned: 15,
               'In Development': 40,
-              'Code Review': 60,
               Testing: 80,
               Completed: 100,
               Blocked: 25,
@@ -358,5 +359,26 @@ exports.createTask = async (req, res) => {
   } catch (error) {
     console.error('Error creating task:', error);
     return res.status(500).json({ error: 'Failed to create task' });
+  }
+};
+
+// DELETE /tasks/:id
+exports.deleteTask = async (req, res) => {
+  try {
+    const taskId = parseInt(req.params.id, 10);
+    if (isNaN(taskId)) {
+      return res.status(400).json({ error: 'Invalid task ID' });
+    }
+
+    const task = await Task.findByPk(taskId);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    await task.destroy();
+    return res.json({ message: 'Task deleted successfully', id: taskId });
+  } catch (error) {
+    console.error('Error deleting task:', error);
+    return res.status(500).json({ error: 'Failed to delete task' });
   }
 };

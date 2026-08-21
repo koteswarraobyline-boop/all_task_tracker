@@ -35,8 +35,8 @@ import PageContainer from '../components/PageContainer';
 import { tokens } from '../theme';
 import { useRole } from '../context/RoleContext';
 import { splitTitleAndDescription } from '../components/TaskDetailsDrawer';
-import { getDeveloperDisplayName } from '../utils/developerDisplay';
 import { getTaskProgressPercent } from '../utils/taskProgress';
+import { DeliveryHealthCard } from '../components/DeliveryHealth';
 import { initials, formatDate, timeAgo } from '../utils/formatters';
 
 const ACCENT = '#3B82F6';
@@ -45,7 +45,6 @@ const STATUS_CHIP = {
   Upcoming: { bgcolor: '#F1F5F9', color: '#475569' },
   Assigned: { bgcolor: '#DBEAFE', color: '#1D4ED8' },
   'In Development': { bgcolor: '#DBEAFE', color: '#1D4ED8' },
-  'Code Review': { bgcolor: '#FFEDD5', color: '#C2410C' },
   Testing: { bgcolor: '#FEF3C7', color: '#B45309' },
   Completed: { bgcolor: '#DCFCE7', color: '#166534' },
   Blocked: { bgcolor: '#FEE2E2', color: '#B91C1C' },
@@ -137,8 +136,8 @@ export default function ClientOverview() {
   const token = clientMeta?.token;
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState([]);
-  const [developers, setDevelopers] = useState([]);
   const [project, setProject] = useState(clientProject);
+  const [delayAnalysis, setDelayAnalysis] = useState(null);
   const [recentTasksPage, setRecentTasksPage] = useState(0);
   const [recentTasksRowsPerPage, setRecentTasksRowsPerPage] = useState(8);
 
@@ -152,12 +151,11 @@ export default function ClientOverview() {
         const password = sessionStorage.getItem(`share-password:${token}`) || undefined;
         const data = await api.getClientTasks(token, password);
         setProject(data.project || clientProject);
+        setDelayAnalysis(data.delayAnalysis || null);
         setTasks(workTasks(data.tasks));
-        setDevelopers(data.developers || []);
       } catch (err) {
         console.error('Client overview load failed:', err);
         setTasks([]);
-        setDevelopers([]);
       } finally {
         setLoading(false);
       }
@@ -184,7 +182,7 @@ export default function ClientOverview() {
     const total = tasks.length;
     const completed = tasks.filter((t) => t.status === 'Completed').length;
     const inProgress = tasks.filter((t) =>
-      ['Assigned', 'In Development', 'Code Review', 'Testing'].includes(t.status)
+      ['Assigned', 'In Development', 'Testing'].includes(t.status) || t.status === 'Code Review'
     ).length;
     const pending = tasks.filter((t) => ['Upcoming', 'Assigned'].includes(t.status)).length;
     const overdue = tasks.filter((t) => {
@@ -194,7 +192,7 @@ export default function ClientOverview() {
     const progress = total ? Math.round((completed / total) * 100) : 0;
     const startDates = tasks.map((t) => t.startDate).filter(Boolean).sort();
     const dueDates = tasks.map((t) => t.dueDate).filter(Boolean).sort();
-    const members = new Set(tasks.map((t) => t.developerId).filter(Boolean)).size;
+    const members = 0;
     const modules = new Set(tasks.map((t) => t.module).filter(Boolean));
     return {
       total,
@@ -213,31 +211,23 @@ export default function ClientOverview() {
   const projectDateMetrics = useMemo(() => {
     const originalDeliveryDate = project?.originalDeliveryDate || metrics.dueDate;
     const revisedDeliveryDate = project?.revisedDeliveryDate || null;
-    const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate;
-
-    let isProjectOverdue = false;
-    let projectOverdueDays = 0;
-    const isExtended = Boolean(revisedDeliveryDate);
-
-    if (effectiveDueDate && metrics.completed < metrics.total) {
-      const dueTime = new Date(effectiveDueDate).setHours(0, 0, 0, 0);
-      const nowTime = today.getTime();
-      if (!isNaN(dueTime) && dueTime < nowTime) {
-        isProjectOverdue = true;
-        projectOverdueDays = Math.ceil((nowTime - dueTime) / (1000 * 60 * 60 * 24));
-      }
-    }
+    const effectiveDueDate =
+      project?.activeDeliveryDate || project?.effectiveDueDate || revisedDeliveryDate || originalDeliveryDate;
 
     return {
       originalDeliveryDate,
       revisedDeliveryDate,
       effectiveDueDate,
       deliveryNotes: project?.deliveryNotes || null,
-      isProjectOverdue,
-      projectOverdueDays,
-      isExtended,
+      isProjectOverdue:
+        project?.isBehindSchedule ||
+        delayAnalysis?.deliveryStatus === 'OVERDUE' ||
+        (project?.daysBehindSchedule || 0) > 0,
+      projectOverdueDays:
+        project?.daysBehindSchedule || delayAnalysis?.daysBehindSchedule || 0,
+      isExtended: Boolean(revisedDeliveryDate),
     };
-  }, [project, metrics, today]);
+  }, [project, delayAnalysis, metrics]);
 
   const milestones = useMemo(() => {
     const names = [...new Set(tasks.map((t) => t.phase).filter(Boolean))].slice(0, 8);
@@ -298,7 +288,6 @@ export default function ClientOverview() {
       'Completed':        '#22C55E',
       'In Development':   '#4F46E5',
       'Assigned':         '#3B82F6',
-      'Code Review':      '#6366F1',
       'Testing':          '#06B6D4',
       'Blocked':          '#EF4444',
       'On Hold':          '#F59E0B',
@@ -312,8 +301,7 @@ export default function ClientOverview() {
         let action = 'was updated';
         if (t.status === 'Completed')           action = 'was completed';
         else if (t.status === 'In Development') action = 'is in development';
-        else if (t.status === 'Code Review')    action = 'is in code review';
-        else if (t.status === 'Testing')        action = 'is being tested';
+        else if (t.status === 'Testing' || t.status === 'Code Review') action = 'is being tested';
         else if (t.status === 'Assigned')       action = 'was assigned';
         else if (t.status === 'Blocked')        action = 'is blocked';
         else if (t.status === 'On Hold')        action = 'is on hold';
@@ -488,8 +476,64 @@ export default function ClientOverview() {
           </Stack>
         </Stack>
       </Paper>
-      {/* Overdue alert banner if project is overdue */}
-      {projectDateMetrics.isProjectOverdue && (
+
+      <Box sx={{ mb: 3 }}>
+        <DeliveryHealthCard
+          analysis={{
+            ...(delayAnalysis || {}),
+            deliveryStatus: delayAnalysis?.deliveryStatus || project?.deliveryStatus,
+            daysOverdue: projectDateMetrics.projectOverdueDays,
+            daysBehindSchedule: projectDateMetrics.projectOverdueDays,
+            completionPercent: metrics.progress,
+            deliveryDate: projectDateMetrics.effectiveDueDate,
+            primaryDelayDriver: delayAnalysis?.primaryDelayedWork
+              ? {
+                  taskName: delayAnalysis.primaryDelayedWork.taskName,
+                  overdueDays: delayAnalysis.primaryDelayedWork.daysBehindSchedule,
+                  progress: delayAnalysis.primaryDelayedWork.progress,
+                }
+              : null,
+            lateTaskCount: metrics.overdue,
+            remainingTaskCount: metrics.total - metrics.completed,
+            isProjectOverdue: projectDateMetrics.isProjectOverdue,
+            progress: metrics.progress,
+          }}
+          compact
+        />
+      </Box>
+
+      {delayAnalysis?.primaryDelayedWork && (
+        <Paper
+          elevation={0}
+          sx={{
+            ...glass,
+            mb: 3,
+            p: 2.5,
+            borderLeft: '4px solid #F59E0B',
+          }}
+        >
+          <Typography sx={{ fontWeight: 800, fontSize: '0.9rem', mb: 1 }}>Schedule Impact</Typography>
+          <Typography sx={{ fontWeight: 750, fontSize: '0.95rem', mb: 0.5 }}>
+            {delayAnalysis.primaryDelayedWork.module
+              ? `${delayAnalysis.primaryDelayedWork.module} — ${delayAnalysis.primaryDelayedWork.taskName}`
+              : delayAnalysis.primaryDelayedWork.taskName}
+          </Typography>
+          <Typography sx={{ fontSize: '0.8125rem', color: '#64748B' }}>
+            {delayAnalysis.primaryDelayedWork.progress}% complete
+            {delayAnalysis.primaryDelayedWork.daysBehindSchedule > 0
+              ? ` · ${delayAnalysis.primaryDelayedWork.daysBehindSchedule} day(s) behind schedule`
+              : ''}
+          </Typography>
+          {delayAnalysis.summary && (
+            <Typography sx={{ fontSize: '0.8125rem', color: '#475569', mt: 1.25, lineHeight: 1.55 }}>
+              {delayAnalysis.summary}
+            </Typography>
+          )}
+        </Paper>
+      )}
+
+      {/* Legacy overdue banner — keep for extended projects without primary delay data */}
+      {projectDateMetrics.isProjectOverdue && !delayAnalysis?.primaryDelayedWork ? (
         <Paper
           elevation={0}
           sx={{
@@ -521,7 +565,36 @@ export default function ClientOverview() {
             )}
           </Box>
         </Paper>
-      )}
+      ) : projectDateMetrics.isExtended ? (
+        <Paper
+          elevation={0}
+          sx={{
+            mb: 3,
+            p: 2.5,
+            borderRadius: `${tokens.radius.card}px`,
+            bgcolor: '#F3E8FF',
+            border: '1.5px solid #C084FC',
+            display: 'flex',
+            gap: 2,
+            alignItems: 'center',
+          }}
+        >
+          <CalendarIcon sx={{ color: '#7E22CE', fontSize: 32 }} />
+          <Box sx={{ flex: 1 }}>
+            <Typography sx={{ fontWeight: 800, fontSize: '0.95rem', color: '#6B21A8' }}>
+              📅 Project Extended — New Target Delivery Date: {formatDate(projectDateMetrics.revisedDeliveryDate)}
+            </Typography>
+            <Typography sx={{ fontSize: '0.825rem', color: '#581C87', mt: 0.25 }}>
+              Original Target Delivery Date: <strong>{formatDate(projectDateMetrics.originalDeliveryDate)}</strong>
+            </Typography>
+            {projectDateMetrics.deliveryNotes && (
+              <Typography sx={{ fontSize: '0.8rem', color: '#6B21A8', fontWeight: 650, mt: 0.75, fontStyle: 'italic' }}>
+                Reason / Note from Admin: &ldquo;{projectDateMetrics.deliveryNotes}&rdquo;
+              </Typography>
+            )}
+          </Box>
+        </Paper>
+      ) : null}
 
       {/* Read-only notice */}
       <Paper

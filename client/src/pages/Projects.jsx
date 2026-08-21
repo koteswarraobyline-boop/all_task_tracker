@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
   Box,
   Typography,
@@ -33,10 +33,8 @@ import {
   Paper,
   ToggleButton,
   ToggleButtonGroup,
-  Divider,
   Skeleton,
   Fab,
-  Collapse,
   Badge,
 } from '@mui/material';
 import {
@@ -47,7 +45,6 @@ import {
   Delete as DeleteIcon,
   Share as ShareIcon,
   Search as SearchIcon,
-  Visibility as ViewIcon,
   MoreVert as MoreIcon,
   FolderOpen as FolderIcon,
   CheckCircle as CheckIcon,
@@ -57,56 +54,72 @@ import {
   FileDownload as ExportIcon,
   GridView as GridIcon,
   ViewList as TableIcon,
-  Sort as SortIcon,
   Clear as ClearIcon,
-  Close as CloseIcon,
   Edit as EditIcon,
-  Bolt as ActiveIcon,
-  Tune as TuneIcon,
-  KeyboardCommandKey as CmdIcon,
+  FilterList as FilterIcon,
+  Notifications as NotificationsIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon,
+  TrendingUp as OnTrackIcon,
+  ErrorOutlineOutlined as AtRiskIcon,
+  Timeline as TimelineIcon,
+  HelpOutlineOutlined as HelpIcon,
+  Event as EventIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
 import EmptyState from '../components/EmptyState';
-import { openClientInviteEmail } from '../utils/clientInviteMail';
 import ShareProjectDialog from '../components/ShareProjectDialog';
 import UpdateDeliveryDateDialog from '../components/UpdateDeliveryDateDialog';
+import EditProjectDialog from '../components/EditProjectDialog';
 import Can from '../components/Can';
-import PageContainer, { MetricCard } from '../components/PageContainer';
+import PageContainer from '../components/PageContainer';
+import { ProjectHealthBadge, DelayAnalysisDrawer } from '../components/DeliveryHealth';
+import { DELIVERY_STATUS_COLORS, deliveryTimingText } from '../utils/deliveryHealth';
 import { tokens } from '../theme';
 
 const AVATAR_COLORS = ['#6366F1', '#3B82F6', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899'];
+const FAVORITES_KEY = 'tt_project_favorites';
 
 const STATUS_CHIP = {
   Active: { bgcolor: '#D1FAE5', color: '#047857' },
   Completed: { bgcolor: '#DBEAFE', color: '#1D4ED8' },
   'On Hold': { bgcolor: '#FFEDD5', color: '#C2410C' },
   Delayed: { bgcolor: '#FEE2E2', color: '#B91C1C' },
+  Planned: { bgcolor: '#F1F5F9', color: '#475569' },
   Archived: { bgcolor: '#F1F5F9', color: '#475569' },
 };
 
-const PRIORITY_CHIP = {
-  High: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-  P0: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-  P1: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-  Medium: { bgcolor: '#FFEDD5', color: '#C2410C' },
-  P2: { bgcolor: '#FFEDD5', color: '#C2410C' },
-  Low: { bgcolor: '#DCFCE7', color: '#15803D' },
-  P3: { bgcolor: '#DCFCE7', color: '#15803D' },
-};
+const DELIVERY_FILTER_OPTIONS = [
+  { id: 'all', label: 'All Delivery Health' },
+  { id: 'ON_TRACK', label: 'On Track' },
+  { id: 'AT_RISK', label: 'At Risk' },
+  { id: 'DUE_SOON', label: 'Due Soon' },
+  { id: 'OVERDUE', label: 'Overdue' },
+  { id: 'COMPLETED', label: 'Completed' },
+];
 
-const CHIP_FILTERS = [
-  { id: 'all', label: 'All Projects' },
+const STATUS_FILTER_OPTIONS = [
+  { id: 'all', label: 'All Status' },
   { id: 'Active', label: 'Active' },
+  { id: 'Planned', label: 'Planned' },
   { id: 'Completed', label: 'Completed' },
-  { id: 'On Hold', label: 'On Hold' },
   { id: 'Archived', label: 'Archived' },
 ];
 
-const glassSx = {
-  bgcolor: 'rgba(255,255,255,0.72)',
-  backdropFilter: 'blur(12px)',
+const SORT_OPTIONS = [
+  { id: 'newest', label: 'Newest First' },
+  { id: 'oldest', label: 'Oldest First' },
+  { id: 'name-asc', label: 'Name A–Z' },
+  { id: 'name-desc', label: 'Name Z–A' },
+  { id: 'due', label: 'Due Date' },
+  { id: 'progress', label: 'Progress' },
+  { id: 'overdue', label: 'Most Overdue' },
+];
+
+const cardSx = {
+  bgcolor: tokens.colors.card,
   border: '1px solid',
-  borderColor: 'rgba(226,232,240,0.9)',
+  borderColor: tokens.colors.border,
   boxShadow: tokens.shadow.card,
   borderRadius: `${tokens.radius.card}px`,
 };
@@ -124,19 +137,8 @@ function formatDate(value) {
   }
 }
 
-function timeAgo(value) {
-  if (!value) return '—';
-  const now = new Date();
-  const past = new Date(value);
-  const diffMs = now - past;
-  const mins = Math.floor(diffMs / 60000);
-  const hours = Math.floor(diffMs / 3600000);
-  const days = Math.floor(diffMs / 86400000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return formatDate(value);
+function formatProjectId(id) {
+  return `PRJ-${String(id).padStart(3, '0')}`;
 }
 
 function initials(name = '') {
@@ -169,40 +171,60 @@ function highlightMatch(text, query) {
   );
 }
 
-function priorityStyle(priority) {
-  const key = Object.keys(PRIORITY_CHIP).find(
-    (k) => k.toLowerCase() === String(priority || '').toLowerCase()
-  );
-  return PRIORITY_CHIP[key] || PRIORITY_CHIP.Medium;
+function progressBarColor(deliveryStatus) {
+  const colors = DELIVERY_STATUS_COLORS[deliveryStatus] || DELIVERY_STATUS_COLORS.ON_TRACK;
+  return colors.color;
+}
+
+function displayStatus(proj) {
+  if (proj.archived) return 'Archived';
+  if (proj.status === 'Completed' || proj.deliveryStatus === 'COMPLETED') return 'Completed';
+  if (!proj.archived && proj.status === 'Active' && (proj.progress === 0 || proj.totalTasks === 0)) {
+    return 'Planned';
+  }
+  return proj.status || 'Active';
+}
+
+function matchesStatusFilter(proj, statusFilter) {
+  if (statusFilter === 'all') return true;
+  return displayStatus(proj) === statusFilter;
+}
+
+function loadFavorites() {
+  try {
+    return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+  } catch {
+    return [];
+  }
 }
 
 function exportProjectsCsv(rows) {
   const headers = [
     'Name',
+    'Project ID',
     'Client',
     'Status',
-    'Priority',
+    'Delivery Health',
     'Progress',
     'Completed',
     'Total Tasks',
-    'Manager',
+    'Owner',
     'Start Date',
     'Due Date',
-    'Estimated Hours',
   ];
   const lines = rows.map((p) =>
     [
       p.name,
+      formatProjectId(p.id),
       p.clientName || '',
-      p.archived ? 'Archived' : p.status,
-      p.priority || '',
+      displayStatus(p),
+      p.deliveryStatus || '',
       `${p.progress || 0}%`,
       p.completed || 0,
       p.totalTasks || 0,
       p.manager?.name || '',
       p.startDate || '',
       p.dueDate || '',
-      p.estimatedHours || 0,
     ]
       .map((v) => `"${String(v).replace(/"/g, '""')}"`)
       .join(',')
@@ -218,8 +240,8 @@ function exportProjectsCsv(rows) {
   URL.revokeObjectURL(url);
 }
 
-function StatusBadge({ status, archived }) {
-  const label = archived ? 'Archived' : status || 'Active';
+function StatusBadge({ proj }) {
+  const label = displayStatus(proj);
   const chip = STATUS_CHIP[label] || STATUS_CHIP.Active;
   return (
     <Chip
@@ -230,40 +252,25 @@ function StatusBadge({ status, archived }) {
   );
 }
 
-function PriorityBadge({ priority }) {
-  const style = priorityStyle(priority);
+function ProgressCell({ progress, completed, total, deliveryStatus, compact }) {
+  const barColor = progressBarColor(deliveryStatus);
   return (
-    <Chip
-      size="small"
-      label={priority || 'Medium'}
-      sx={{ fontWeight: 700, height: 26, borderRadius: 999, ...style }}
-    />
-  );
-}
-
-function ProgressCell({ progress, completed, total, compact }) {
-  const barColor = progress >= 100 ? '#22C55E' : progress >= 50 ? '#4F46E5' : '#94A3B8';
-  return (
-    <Box sx={{ minWidth: compact ? 100 : 140 }}>
-      <Stack
-        direction="row"
-        sx={{
-          justifyContent: "space-between",
-          alignItems: "center",
-          mb: 0.75
-        }}>
-        <Typography sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{progress}%</Typography>
-        {!compact && (
+    <Box sx={{ minWidth: compact ? 100 : '100%' }}>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 0.5, gap: 1 }}>
+        {!compact && completed != null && total != null ? (
           <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
             {completed} / {total}
           </Typography>
+        ) : (
+          <Box sx={{ flex: 1 }} />
         )}
+        <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', flexShrink: 0 }}>{progress}%</Typography>
       </Stack>
       <LinearProgress
         variant="determinate"
         value={progress}
         sx={{
-          height: 8,
+          height: compact ? 6 : 10,
           borderRadius: 99,
           bgcolor: '#E2E8F0',
           '& .MuiLinearProgress-bar': {
@@ -277,16 +284,64 @@ function ProgressCell({ progress, completed, total, compact }) {
   );
 }
 
+function KpiStripCard({ label, value, sub, icon, tint, iconColor }) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        ...cardSx,
+        p: 2,
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 1.5,
+        minHeight: 96,
+      }}
+    >
+      <Box
+        sx={{
+          width: 40,
+          height: 40,
+          borderRadius: `${tokens.radius.button}px`,
+          bgcolor: tint,
+          color: iconColor,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          '& .MuiSvgIcon-root': { fontSize: 22 },
+        }}
+      >
+        {icon}
+      </Box>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: 'text.secondary', mb: 0.25 }}>
+          {label}
+        </Typography>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 800, lineHeight: 1.2, color: 'text.primary' }}>
+          {value}
+        </Typography>
+        {sub ? (
+          <Typography sx={{ fontSize: '0.7rem', fontWeight: 600, color: 'text.secondary', mt: 0.25 }}>
+            {sub}
+          </Typography>
+        ) : null}
+      </Box>
+    </Paper>
+  );
+}
+
 function ProjectCard({
   proj,
   search,
+  isFavorite,
+  onToggleFavorite,
   onOpen,
-  onDashboard,
-  onCalendar,
-  onShare,
   onMenu,
 }) {
   const color = projectColor(proj.id);
+  const projectCode = formatProjectId(proj.id);
+  const members = proj.members || [];
+  const isOverdue = proj.deliveryStatus === 'OVERDUE' || proj.isProjectOverdue;
 
   const stop = (e) => e.stopPropagation();
 
@@ -310,7 +365,7 @@ function ProjectCard({
       }}
       aria-label={`Open ${proj.name || 'project'}`}
       sx={{
-        ...glassSx,
+        ...cardSx,
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
@@ -319,57 +374,30 @@ function ProjectCard({
         transition: tokens.motion.fast,
         '&:hover': { boxShadow: tokens.shadow.hover },
         '&:focus-visible': {
-          outline: `2px solid ${color}`,
+          outline: `2px solid ${tokens.colors.primary}`,
           outlineOffset: 2,
         },
       }}
     >
-      {/* Hero header */}
-      <Box
-        sx={{
-          px: 3,
-          pt: 3,
-          pb: 2.5,
-          background: `linear-gradient(135deg, ${color}18 0%, ${color}08 50%, transparent 100%)`,
-          borderBottom: '1px solid',
-          borderColor: 'divider',
-        }}
-      >
-        <Stack
-          direction="row"
-          sx={{
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 1.5,
-          }}
-        >
-          <Stack
-            direction="row"
-            sx={{
-              gap: 1.5,
-              alignItems: 'center',
-              minWidth: 0,
-              flex: 1,
-            }}
-          >
+      <Box sx={{ px: 2.5, pt: 2.5, pb: 2.25, flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 1.25 }}>
+          <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', minWidth: 0, flex: 1 }}>
             <Avatar
               sx={{
                 width: 48,
                 height: 48,
                 bgcolor: color,
-                fontWeight: 800,
-                fontSize: '1.1rem',
-                borderRadius: 2.5,
-                boxShadow: `0 8px 20px ${color}40`,
+                borderRadius: `${tokens.radius.button}px`,
+                flexShrink: 0,
               }}
             >
-              {(proj.name || '?').charAt(0).toUpperCase()}
+              <FolderIcon sx={{ fontSize: 22 }} />
             </Avatar>
             <Box sx={{ minWidth: 0 }}>
               <Typography
                 sx={{
-                  fontWeight: 750,
-                  fontSize: '1rem',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
                   lineHeight: 1.35,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -378,206 +406,124 @@ function ProjectCard({
               >
                 {highlightMatch(proj.name, search)}
               </Typography>
-              <Typography
-                sx={{
-                  fontSize: '0.8rem',
-                  color: 'text.secondary',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {highlightMatch(proj.clientName || 'Internal project', search)}
+              <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', fontWeight: 600, mt: 0.15 }}>
+                {highlightMatch(projectCode, search)}
               </Typography>
             </Box>
           </Stack>
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              stop(e);
-              onMenu(e, proj);
-            }}
-            aria-label="More"
-          >
-            <MoreIcon fontSize="small" />
-          </IconButton>
+          <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                stop(e);
+                onToggleFavorite(proj.id);
+              }}
+              aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+              sx={{ color: isFavorite ? '#F59E0B' : 'text.secondary', p: 0.75 }}
+            >
+              {isFavorite ? <StarIcon sx={{ fontSize: 20 }} /> : <StarBorderIcon sx={{ fontSize: 20 }} />}
+            </IconButton>
+            {proj.deliveryStatus ? <ProjectHealthBadge status={proj.deliveryStatus} /> : null}
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                stop(e);
+                onMenu(e, proj);
+              }}
+              aria-label="More actions"
+              sx={{ p: 0.75 }}
+            >
+              <MoreIcon sx={{ fontSize: 20 }} />
+            </IconButton>
+          </Stack>
         </Stack>
 
-        <Stack
-          direction="row"
-          useFlexGap
-          sx={{
-            gap: 1,
-            flexWrap: 'wrap',
-            mt: 2,
-          }}
-        >
-          <StatusBadge status={proj.status} archived={proj.archived} />
-          <PriorityBadge priority={proj.priority} />
-        </Stack>
-      </Box>
-      <Box sx={{ px: 3, py: 2.5, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {proj.description ? (
           <Typography
             sx={{
-              fontSize: '0.8rem',
+              fontSize: '0.8125rem',
               color: 'text.secondary',
               lineHeight: 1.55,
               display: '-webkit-box',
               WebkitLineClamp: 2,
               WebkitBoxOrient: 'vertical',
               overflow: 'hidden',
+              minHeight: '2.6em',
             }}
           >
-            {proj.description}
+            {highlightMatch(proj.description, search)}
           </Typography>
-        ) : null}
+        ) : (
+          <Box sx={{ minHeight: '2.6em' }} />
+        )}
 
         <ProgressCell
           progress={proj.progress || 0}
           completed={proj.completed || 0}
           total={proj.totalTasks || 0}
+          deliveryStatus={proj.deliveryStatus}
         />
 
-        <Stack
-          direction="row"
-          sx={{
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 1,
-          }}
-        >
-          <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, fontWeight: 600 }}>
-              Manager
-            </Typography>
-            <Stack
-              direction="row"
-              sx={{
-                alignItems: 'center',
-                gap: 1,
-              }}
-            >
-              {proj.manager ? (
-                <>
-                  <Avatar sx={{ width: 22, height: 22, fontSize: '0.65rem', bgcolor: proj.manager.color || color }}>
-                    {initials(proj.manager.name)}
-                  </Avatar>
-                  <Typography
-                    sx={{
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {proj.manager.name}
-                  </Typography>
-                </>
-              ) : (
-                <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Unassigned</Typography>
-              )}
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-end', gap: 1.25, mt: 'auto', pt: 0.5 }}>
+          <Stack direction="row" useFlexGap sx={{ gap: 2.5, flexWrap: 'wrap' }}>
+            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
+              <EventIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+              <Box>
+                <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 700, lineHeight: 1 }}>
+                  Start
+                </Typography>
+                <Typography sx={{ fontSize: '0.78rem', fontWeight: 600 }}>{formatDate(proj.startDate)}</Typography>
+              </Box>
             </Stack>
-          </Box>
-          <Box sx={{ textAlign: 'right' }}>
-            <Typography
+            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
+              <EventIcon sx={{ fontSize: 16, color: isOverdue ? 'error.main' : 'text.secondary' }} />
+              <Box>
+                <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 700, lineHeight: 1 }}>
+                  Due
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    color: isOverdue ? 'error.main' : 'text.primary',
+                  }}
+                >
+                  {formatDate(proj.dueDate)}
+                </Typography>
+                {isOverdue && (
+                  <Typography sx={{ fontSize: '0.7rem', color: 'error.main', fontWeight: 700 }}>
+                    {deliveryTimingText(proj)}
+                  </Typography>
+                )}
+              </Box>
+            </Stack>
+          </Stack>
+          {members.length > 0 ? (
+            <AvatarGroup
+              max={3}
               sx={{
-                fontSize: '0.7rem',
-                color: proj.isProjectOverdue ? '#DC2626' : 'text.secondary',
-                mb: 0.3,
-                fontWeight: 750,
-                letterSpacing: '0.02em',
+                justifyContent: 'flex-end',
+                '& .MuiAvatar-root': { width: 30, height: 30, fontSize: '0.65rem', fontWeight: 700, border: '2px solid #fff' },
               }}
             >
-              {proj.isProjectOverdue ? `OVERDUE (${proj.projectOverdueDays}d)` : 'DUE'}
-            </Typography>
-            {proj.isProjectOverdue ? (
-              <Chip
-                icon={<OverdueIcon sx={{ fontSize: '12px !important', color: '#DC2626 !important' }} />}
-                label={formatDate(proj.effectiveDueDate || proj.revisedDeliveryDate || proj.dueDate)}
-                size="small"
-                sx={{
-                  bgcolor: '#FEF2F2',
-                  color: '#B91C1C',
-                  fontWeight: 800,
-                  border: '1px solid #FCA5A5',
-                  height: 22,
-                  fontSize: '0.75rem',
-                }}
-              />
-            ) : (
-              <Typography
-                sx={{
-                  fontSize: '0.825rem',
-                  fontWeight: 750,
-                  color: proj.revisedDeliveryDate ? '#6B21A8' : 'text.primary',
-                }}
-              >
-                {formatDate(proj.effectiveDueDate || proj.revisedDeliveryDate || proj.dueDate)}
-              </Typography>
-            )}
-            {proj.revisedDeliveryDate && !proj.isProjectOverdue && (
-              <Typography sx={{ fontSize: '0.65rem', color: '#6B21A8', fontWeight: 750, mt: 0.2 }}>
-                Extended Date
-              </Typography>
-            )}
-          </Box>
+              {members.map((m) => (
+                <Tooltip key={m.id} title={m.name}>
+                  <Avatar sx={{ bgcolor: m.color || color }}>{initials(m.name)}</Avatar>
+                </Tooltip>
+              ))}
+            </AvatarGroup>
+          ) : null}
         </Stack>
       </Box>
-      {/* Footer actions */}
-      <Stack
-        direction="row"
-        onClick={stop}
-        onKeyDown={stop}
-        sx={{
-          gap: 1,
-          px: 2.5,
-          py: 2,
-          borderTop: '1px solid',
-          borderColor: 'divider',
-          bgcolor: 'rgba(248,250,252,0.65)',
-        }}
-      >
-        <Tooltip title="Dashboard">
-          <IconButton
-            size="small"
-            onClick={() => onDashboard(proj)}
-            sx={{ border: '1px solid', borderColor: 'divider' }}
-          >
-            <DashboardIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Calendar">
-          <IconButton
-            size="small"
-            onClick={() => onCalendar(proj)}
-            sx={{ border: '1px solid', borderColor: 'divider' }}
-          >
-            <CalendarIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Can permission="project.share">
-          <Tooltip title="Share">
-            <IconButton
-              size="small"
-              onClick={() => onShare(proj)}
-              sx={{ border: '1px solid', borderColor: 'divider' }}
-            >
-              <ShareIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Can>
-      </Stack>
     </Paper>
   );
 }
 
 function LoadingSkeleton({ view }) {
-  if (view === 'list') {
+  if (view === 'table') {
     return (
-      <Paper elevation={0} sx={{ ...glassSx, p: 2 }}>
-        {[1, 2, 3, 4, 5].map((i) => (
+      <Paper elevation={0} sx={{ ...cardSx, p: 2 }}>
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <Skeleton key={i} variant="rounded" height={56} sx={{ mb: 1.5, borderRadius: 2 }} />
         ))}
       </Paper>
@@ -587,50 +533,67 @@ function LoadingSkeleton({ view }) {
     <Box
       sx={{
         display: 'grid',
-        gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', xl: 'repeat(3, 1fr)' },
-        gap: 3,
+        gridTemplateColumns: {
+          xs: '1fr',
+          md: 'repeat(2, minmax(0, 1fr))',
+          lg: 'repeat(3, minmax(0, 1fr))',
+          xl: 'repeat(4, minmax(0, 1fr))',
+        },
+        gap: 2.5,
       }}
     >
-      {[1, 2, 3, 4, 5, 6].map((i) => (
-        <Skeleton key={i} variant="rounded" height={420} sx={{ borderRadius: `${tokens.radius.card}px` }} />
+      {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+        <Skeleton key={i} variant="rounded" height={360} sx={{ borderRadius: `${tokens.radius.card}px` }} />
       ))}
     </Box>
   );
 }
 
+const filterSelectSx = {
+  minWidth: { xs: '100%', sm: 130 },
+  flex: { sm: '1 1 130px' },
+  '& .MuiOutlinedInput-root': {
+    height: 36,
+    bgcolor: tokens.colors.card,
+    borderRadius: `${tokens.radius.input}px`,
+    fontSize: '0.8125rem',
+    fontWeight: 600,
+  },
+  '& .MuiInputLabel-root': { fontSize: '0.8125rem' },
+};
+
 export default function Projects() {
+  const [searchParams] = useSearchParams();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [openDelete, setOpenDelete] = useState(false);
   const [deleteProj, setDeleteProj] = useState(null);
   const [shareProj, setShareProj] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [alert, setAlert] = useState({ open: false, message: '', severity: 'success' });
-  const [search, setSearch] = useState('');
-  const [chipFilter, setChipFilter] = useState('all');
-  const [clientFilter, setClientFilter] = useState('all');
-  const [teamFilter, setTeamFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [filterSearch, setFilterSearch] = useState('');
+  const [deliveryFilter, setDeliveryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateRange, setDateRange] = useState('all');
-  const [showFilters, setShowFilters] = useState(false);
-  const [view, setView] = useState(() => localStorage.getItem('tt_projects_view') || 'grid');
-  const [sortBy, setSortBy] = useState('updated');
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
+  const [view, setView] = useState(() => {
+    const stored = localStorage.getItem('tt_projects_view') || 'grid';
+    return stored === 'list' ? 'table' : stored;
+  });
+  const [sortBy, setSortBy] = useState('newest');
   const [page, setPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(12);
+  const [rowsPerPage, setRowsPerPage] = useState(8);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuProj, setMenuProj] = useState(null);
+  const [editProj, setEditProj] = useState(null);
   const [dateDialogProj, setDateDialogProj] = useState(null);
-  const [sortAnchor, setSortAnchor] = useState(null);
+  const [delayDrawerProj, setDelayDrawerProj] = useState(null);
+  const [delayAnalysis, setDelayAnalysis] = useState(null);
+  const [delayDrawerOpen, setDelayDrawerOpen] = useState(false);
   const [moreAnchor, setMoreAnchor] = useState(null);
-  const [recentSearches, setRecentSearches] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('tt_project_searches') || '[]');
-    } catch {
-      return [];
-    }
-  });
-  const [searchFocused, setSearchFocused] = useState(false);
+  const [favorites, setFavorites] = useState(loadFavorites);
   const navigate = useNavigate();
 
   const showAlert = useCallback((message, severity = 'success') => {
@@ -640,10 +603,12 @@ export default function Projects() {
   const fetchProjects = useCallback(async () => {
     try {
       setLoading(true);
+      setFetchError(null);
       const data = await api.getProjects();
       setProjects(data || []);
     } catch (error) {
       console.error('Failed to load projects:', error);
+      setFetchError('Failed to load projects. Please try again.');
       showAlert('Failed to load projects', 'error');
     } finally {
       setLoading(false);
@@ -655,10 +620,22 @@ export default function Projects() {
   }, [fetchProjects]);
 
   useEffect(() => {
+    const delivery = searchParams.get('delivery');
+    const status = searchParams.get('status');
+    const q = searchParams.get('search');
+    if (delivery) setDeliveryFilter(delivery);
+    if (status) setStatusFilter(status);
+    if (q) setGlobalSearch(q);
+  }, [searchParams]);
+
+  useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      const tag = e.target?.tagName?.toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || e.target?.isContentEditable;
+      if (isTyping) return;
+      if (e.key === '/') {
         e.preventDefault();
-        document.getElementById('projects-search')?.focus();
+        document.getElementById('projects-global-search')?.focus();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -669,14 +646,14 @@ export default function Projects() {
     localStorage.setItem('tt_projects_view', view);
   }, [view]);
 
-  const rememberSearch = (q) => {
-    const trimmed = q.trim();
-    if (!trimmed) return;
-    setRecentSearches((prev) => {
-      const next = [trimmed, ...prev.filter((x) => x !== trimmed)].slice(0, 5);
-      localStorage.setItem('tt_project_searches', JSON.stringify(next));
-      return next;
-    });
+  useEffect(() => {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+  }, [favorites]);
+
+  const toggleFavorite = (id) => {
+    setFavorites((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
   const handleOpenDelete = (proj) => {
@@ -706,427 +683,426 @@ export default function Projects() {
     }
   };
 
-  const clients = useMemo(
-    () =>
-      [...new Set(projects.map((p) => p.clientName).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b)
-      ),
-    [projects]
-  );
+  const openDelayAnalysis = async (proj) => {
+    if (!proj?.id) return;
+    setDelayDrawerProj(proj);
+    setDelayDrawerOpen(true);
+    try {
+      const analysis = await api.getProjectDelayAnalysis(proj.id);
+      setDelayAnalysis(analysis);
+    } catch (err) {
+      console.error('Failed to load delay analysis:', err);
+      showAlert('Unable to load delay analysis', 'error');
+    }
+  };
 
-  const teams = useMemo(() => {
-    const map = {};
-    projects.forEach((p) => (p.members || []).forEach((m) => {
-      map[m.id] = m.name;
-    }));
-    return Object.entries(map)
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [projects]);
-
-  const priorities = useMemo(
-    () =>
-      [...new Set(projects.map((p) => p.priority).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b)
-      ),
-    [projects]
-  );
+  const effectiveSearch = (filterSearch.trim() || globalSearch.trim()).toLowerCase();
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     let rows = projects.filter((p) => {
-      if (chipFilter === 'Archived') {
-        if (!p.archived) return false;
-      } else if (chipFilter !== 'all') {
-        if (p.archived && chipFilter !== 'Completed') return false;
-        if ((p.status || 'Active') !== chipFilter) return false;
+      if (!matchesStatusFilter(p, statusFilter)) return false;
+
+      if (deliveryFilter !== 'all') {
+        const ds = p.deliveryStatus || 'ON_TRACK';
+        if (deliveryFilter === 'AT_RISK') {
+          if (!['AT_RISK', 'DUE_SOON'].includes(ds)) return false;
+        } else if (ds !== deliveryFilter) return false;
       }
 
-      if (clientFilter !== 'all' && (p.clientName || '') !== clientFilter) return false;
-      if (teamFilter !== 'all' && !(p.members || []).some((m) => String(m.id) === String(teamFilter))) {
-        return false;
-      }
-      if (priorityFilter !== 'all' && String(p.priority || '').toLowerCase() !== priorityFilter.toLowerCase()) {
-        return false;
-      }
-      if (statusFilter !== 'all' && (p.status || 'Active') !== statusFilter) return false;
-
-      if (dateRange !== 'all' && p.dueDate) {
-        const due = new Date(p.dueDate);
-        const now = new Date();
-        const end = new Date();
-        if (dateRange === '7d') end.setDate(now.getDate() + 7);
-        if (dateRange === '30d') end.setDate(now.getDate() + 30);
-        if (dateRange === 'overdue') {
-          if (due >= now || p.status === 'Completed') return false;
-        } else if (due < now || due > end) return false;
-      } else if (dateRange !== 'all' && !p.dueDate) {
+      if (dateStart && p.dueDate) {
+        if (new Date(p.dueDate) < new Date(dateStart)) return false;
+      } else if (dateStart && !p.dueDate) {
         return false;
       }
 
-      if (!q) return true;
+      if (dateEnd && p.dueDate) {
+        const end = new Date(dateEnd);
+        end.setHours(23, 59, 59, 999);
+        if (new Date(p.dueDate) > end) return false;
+      } else if (dateEnd && !p.dueDate) {
+        return false;
+      }
+
+      if (!effectiveSearch) return true;
       const hay = [
         p.name,
-        p.clientName,
+        formatProjectId(p.id),
         p.description,
         p.manager?.name,
+        p.owner?.name,
         ...(p.tags || []),
-        ...(p.members || []).map((m) => m.name),
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      return hay.includes(q);
+      return hay.includes(effectiveSearch);
     });
 
     rows = [...rows].sort((a, b) => {
-      if (sortBy === 'name') return String(a.name || '').localeCompare(String(b.name || ''));
+      if (sortBy === 'name-asc') return String(a.name || '').localeCompare(String(b.name || ''));
+      if (sortBy === 'name-desc') return String(b.name || '').localeCompare(String(a.name || ''));
       if (sortBy === 'progress') return (b.progress || 0) - (a.progress || 0);
       if (sortBy === 'due') {
         const ad = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
         const bd = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
         return ad - bd;
       }
-      if (sortBy === 'priority') {
-        const rank = (p) => {
-          const v = String(p || '').toLowerCase();
-          if (['high', 'p0', 'p1'].includes(v)) return 3;
-          if (['medium', 'p2'].includes(v)) return 2;
-          return 1;
-        };
-        return rank(b.priority) - rank(a.priority);
+      if (sortBy === 'overdue') return (b.projectOverdueDays || 0) - (a.projectOverdueDays || 0);
+      if (sortBy === 'oldest') {
+        return new Date(a.lastUpdated || a.createdAt || 0) - new Date(b.lastUpdated || b.createdAt || 0);
       }
-      return new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0);
+      return new Date(b.lastUpdated || b.createdAt || 0) - new Date(a.lastUpdated || a.createdAt || 0);
     });
 
     return rows;
-  }, [
-    projects,
-    search,
-    chipFilter,
-    clientFilter,
-    teamFilter,
-    priorityFilter,
-    statusFilter,
-    dateRange,
-    sortBy,
-  ]);
+  }, [projects, effectiveSearch, deliveryFilter, statusFilter, dateStart, dateEnd, sortBy]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, chipFilter, clientFilter, teamFilter, priorityFilter, statusFilter, dateRange, sortBy, view]);
+  }, [globalSearch, filterSearch, deliveryFilter, statusFilter, dateStart, dateEnd, sortBy, view]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
   const paged = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   const from = filtered.length === 0 ? 0 : (page - 1) * rowsPerPage + 1;
   const to = Math.min(page * rowsPerPage, filtered.length);
 
-  const totals = useMemo(() => {
+  const overdueCount = useMemo(
+    () => projects.filter((p) => p.deliveryStatus === 'OVERDUE' || p.isProjectOverdue).length,
+    [projects]
+  );
+
+  const kpi = useMemo(() => {
     const total = projects.length;
-    const active = projects.filter((p) => p.status === 'Active' && !p.archived).length;
-    const completed = projects.filter((p) => p.status === 'Completed').length;
-    const delayed = projects.filter((p) => p.status === 'Delayed').length;
-    const avgProgress =
-      total > 0 ? Math.round(projects.reduce((s, p) => s + (p.progress || 0), 0) / total) : 0;
-    return { total, active, completed, delayed, avgProgress };
+    if (total === 0) {
+      return {
+        total: 0,
+        onTrack: 0,
+        atRisk: 0,
+        overdue: 0,
+        completed: 0,
+        onTrackPct: 0,
+        atRiskPct: 0,
+        overduePct: 0,
+        completedPct: 0,
+      };
+    }
+    let onTrack = 0;
+    let atRisk = 0;
+    let overdue = 0;
+    let completed = 0;
+    projects.forEach((p) => {
+      const ds = p.deliveryStatus || 'ON_TRACK';
+      if (ds === 'ON_TRACK') onTrack += 1;
+      else if (ds === 'AT_RISK' || ds === 'DUE_SOON') atRisk += 1;
+      else if (ds === 'OVERDUE') overdue += 1;
+      else if (ds === 'COMPLETED') completed += 1;
+    });
+    const pct = (n) => Number(((n / total) * 100).toFixed(2));
+    return {
+      total,
+      onTrack,
+      atRisk,
+      overdue,
+      completed,
+      onTrackPct: pct(onTrack),
+      atRiskPct: pct(atRisk),
+      overduePct: pct(overdue),
+      completedPct: pct(completed),
+    };
   }, [projects]);
 
   const appliedFilters = useMemo(() => {
     const items = [];
-    if (clientFilter !== 'all') items.push({ key: 'client', label: `Client: ${clientFilter}` });
-    if (teamFilter !== 'all') {
-      const t = teams.find((x) => String(x.id) === String(teamFilter));
-      items.push({ key: 'team', label: `Team: ${t?.name || teamFilter}` });
+    if (globalSearch.trim()) items.push({ key: 'globalSearch', label: `Search: ${globalSearch.trim()}` });
+    if (filterSearch.trim()) items.push({ key: 'filterSearch', label: `Keyword: ${filterSearch.trim()}` });
+    if (deliveryFilter !== 'all') {
+      const label = DELIVERY_FILTER_OPTIONS.find((o) => o.id === deliveryFilter)?.label || deliveryFilter;
+      items.push({ key: 'delivery', label: `Delivery: ${label}` });
     }
-    if (priorityFilter !== 'all') items.push({ key: 'priority', label: `Priority: ${priorityFilter}` });
     if (statusFilter !== 'all') items.push({ key: 'status', label: `Status: ${statusFilter}` });
-    if (dateRange !== 'all') {
-      const labels = { '7d': 'Due in 7 days', '30d': 'Due in 30 days', overdue: 'Overdue' };
-      items.push({ key: 'date', label: labels[dateRange] || dateRange });
-    }
+    if (dateStart) items.push({ key: 'dateStart', label: `From: ${dateStart}` });
+    if (dateEnd) items.push({ key: 'dateEnd', label: `To: ${dateEnd}` });
     return items;
-  }, [clientFilter, teamFilter, priorityFilter, statusFilter, dateRange, teams]);
+  }, [globalSearch, filterSearch, deliveryFilter, statusFilter, dateStart, dateEnd]);
 
   const resetFilters = () => {
-    setChipFilter('all');
-    setClientFilter('all');
-    setTeamFilter('all');
-    setPriorityFilter('all');
+    setGlobalSearch('');
+    setFilterSearch('');
+    setDeliveryFilter('all');
     setStatusFilter('all');
-    setDateRange('all');
-    setSearch('');
+    setDateStart('');
+    setDateEnd('');
+    setSortBy('newest');
   };
 
   const clearApplied = (key) => {
-    if (key === 'client') setClientFilter('all');
-    if (key === 'team') setTeamFilter('all');
-    if (key === 'priority') setPriorityFilter('all');
+    if (key === 'globalSearch') setGlobalSearch('');
+    if (key === 'filterSearch') setFilterSearch('');
+    if (key === 'delivery') setDeliveryFilter('all');
     if (key === 'status') setStatusFilter('all');
-    if (key === 'date') setDateRange('all');
+    if (key === 'dateStart') setDateStart('');
+    if (key === 'dateEnd') setDateEnd('');
   };
 
-  const upcomingDeadlines = useMemo(() => {
-    return [...projects]
-      .filter((p) => p.dueDate && p.status !== 'Completed')
-      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
-      .slice(0, 5);
-  }, [projects]);
-
-  const recentlyUpdated = useMemo(() => {
-    return [...projects]
-      .sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0))
-      .slice(0, 5);
-  }, [projects]);
-
-  const filterSelectSx = {
-    minWidth: 130,
-    '& .MuiOutlinedInput-root': {
-      height: 40,
-      bgcolor: '#fff',
-      borderRadius: `${tokens.radius.button}px`,
-      fontSize: '0.8rem',
-      fontWeight: 600,
-    },
+  const filterSelectProps = {
+    size: 'small',
+    SelectProps: { displayEmpty: true },
   };
 
   return (
-    <PageContainer maxWidth={1800}>
-      {/* PAGE HEADER */}
-      <Stack
-        direction={{ xs: 'column', lg: 'row' }}
+    <PageContainer maxWidth={1600} sx={{ py: { xs: 2, md: 2.5 }, px: { xs: 2, md: 3 } }}>
+      {/* Unified page header — matches reference layout */}
+      <Box
         sx={{
-          justifyContent: "space-between",
-          alignItems: { xs: 'stretch', lg: 'center' },
-          gap: 3,
-          mb: 4
-        }}>
-        <Box sx={{ minWidth: 0 }}>
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', lg: 'minmax(220px, 1fr) minmax(320px, 1.4fr)' },
+          gap: { xs: 2, lg: 3 },
+          alignItems: { lg: 'start' },
+          mb: 2,
+        }}
+      >
+        <Box>
           <Typography
             component="h1"
             sx={{
-              fontSize: { xs: '1.85rem', md: '2.35rem' },
+              fontSize: { xs: '1.65rem', md: '1.85rem' },
               fontWeight: 800,
               letterSpacing: '-0.02em',
               lineHeight: 1.2,
-              color: 'text.primary',
-              mb: 0.75,
+              color: tokens.colors.text,
+              mb: 0.5,
             }}
           >
             Projects
           </Typography>
-          <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', lineHeight: 1.5 }}>
-            Manage all your projects in one place.
+          <Typography sx={{ fontSize: '0.875rem', color: tokens.colors.textSecondary, lineHeight: 1.5 }}>
+            Manage and track all your projects in one place
           </Typography>
         </Box>
 
-        <Stack
-          direction="row"
-          useFlexGap
-          sx={{
-            gap: 1.25,
-            flexWrap: "wrap",
-            alignItems: "center"
-          }}>
-        <Can permission="csv.upload">
-          <Button
-            variant="contained"
-              startIcon={<AddIcon />}
-            onClick={() => navigate('/projects/upload')}
-            sx={{
-                background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
-                boxShadow: '0 8px 24px rgba(79,70,229,0.35)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #4338CA 0%, #6D28D9 100%)',
-                },
-              }}
-            >
-              New Project
-          </Button>
-        </Can>
-          <Can permission="csv.upload">
-            <Button
-              variant="outlined"
-              startIcon={<UploadIcon />}
-              onClick={() => navigate('/projects/upload')}
-              sx={{ bgcolor: '#fff' }}
-            >
-              Import CSV
-            </Button>
-          </Can>
-          <Button
-            variant="outlined"
-            startIcon={<ExportIcon />}
-            onClick={() => {
-              exportProjectsCsv(filtered);
-              showAlert(`Exported ${filtered.length} projects`);
-            }}
-            disabled={!filtered.length}
-            sx={{ bgcolor: '#fff' }}
-          >
-            Export
-          </Button>
-          <Tooltip title="Refresh">
-            <IconButton
-              onClick={fetchProjects}
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                bgcolor: '#fff',
-                borderRadius: `${tokens.radius.button}px`,
-                width: 44,
-                height: 44,
-              }}
-            >
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Stack>
-      {/* TOOLBAR */}
-      <Paper elevation={0} sx={{ ...glassSx, p: 2, mb: 3 }}>
-        <Stack
-          direction={{ xs: 'column', lg: 'row' }}
-          sx={{
-            gap: 2,
-            alignItems: { xs: 'stretch', lg: 'center' },
-            justifyContent: "space-between"
-          }}>
-          {/* Search */}
-          <Box sx={{ position: 'relative', minWidth: { xs: '100%', lg: 280 }, flex: { lg: '0 1 320px' } }}>
+        <Stack sx={{ gap: 1.25, minWidth: 0 }}>
+          <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
             <TextField
-              id="projects-search"
+              id="projects-global-search"
               size="small"
               fullWidth
-              placeholder="Search projects…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') rememberSearch(search);
-              }}
+              placeholder="Search projects..."
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
               sx={{
                 '& .MuiOutlinedInput-root': {
-                  height: 44,
-                  bgcolor: '#F8FAFC',
-                  borderRadius: `${tokens.radius.button}px`,
+                  height: 40,
+                  bgcolor: tokens.colors.card,
+                  borderRadius: `${tokens.radius.input}px`,
                 },
               }}
               slotProps={{
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
-                      <SearchIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
+                      <SearchIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                     </InputAdornment>
                   ),
                   endAdornment: (
                     <InputAdornment position="end">
-                      {search ? (
-                        <IconButton size="small" onClick={() => setSearch('')} aria-label="Clear search">
+                      {globalSearch ? (
+                        <IconButton size="small" onClick={() => setGlobalSearch('')} aria-label="Clear search">
                           <ClearIcon fontSize="small" />
                         </IconButton>
                       ) : (
                         <Chip
                           size="small"
-                          icon={<CmdIcon sx={{ fontSize: '14px !important' }} />}
-                          label="K"
-                          sx={{ height: 22, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#E2E8F0' }}
+                          label="/"
+                          sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#E2E8F0', minWidth: 26 }}
                         />
                       )}
                     </InputAdornment>
                   ),
-                }
+                },
               }}
             />
-            <AnimatePresence>
-              {searchFocused && recentSearches.length > 0 && !search && (
-                <Paper
-                  component={motion.div}
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  elevation={8}
-                  sx={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    right: 0,
-                    mt: 1,
-                    zIndex: 20,
-                    borderRadius: 2,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <Typography sx={{ px: 2, pt: 1.5, pb: 0.5, fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary' }}>
-                    Recent searches
-                  </Typography>
-                  {recentSearches.map((q) => (
-                    <MenuItem
-                      key={q}
-                      onClick={() => {
-                        setSearch(q);
-                        setSearchFocused(false);
-                      }}
-                      dense
-                    >
-                      <SearchIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                      {q}
-                    </MenuItem>
-                  ))}
-                </Paper>
-              )}
-            </AnimatePresence>
+            <Tooltip title={`${overdueCount} overdue project${overdueCount === 1 ? '' : 's'}`}>
+              <IconButton
+                aria-label={`Notifications, ${overdueCount} overdue`}
+                onClick={() => {
+                  setDeliveryFilter('OVERDUE');
+                  setStatusFilter('all');
+                }}
+                sx={{
+                  border: '1px solid',
+                  borderColor: tokens.colors.border,
+                  bgcolor: tokens.colors.card,
+                  borderRadius: `${tokens.radius.button}px`,
+                  width: 40,
+                  height: 40,
+                  flexShrink: 0,
+                }}
+              >
+                <Badge badgeContent={overdueCount || null} color="error" max={99}>
+                  <NotificationsIcon sx={{ fontSize: 20 }} />
+                </Badge>
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Help">
+              <IconButton
+                aria-label="Help"
+                sx={{
+                  border: '1px solid',
+                  borderColor: tokens.colors.border,
+                  bgcolor: tokens.colors.card,
+                  borderRadius: `${tokens.radius.button}px`,
+                  width: 40,
+                  height: 40,
+                  flexShrink: 0,
+                }}
+              >
+                <HelpIcon sx={{ fontSize: 20 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="More options">
+              <IconButton
+                aria-label="More options"
+                onClick={(e) => setMoreAnchor(e.currentTarget)}
+                sx={{
+                  border: '1px solid',
+                  borderColor: tokens.colors.border,
+                  bgcolor: tokens.colors.card,
+                  borderRadius: `${tokens.radius.button}px`,
+                  width: 40,
+                  height: 40,
+                  flexShrink: 0,
+                }}
+              >
+                <MoreIcon sx={{ fontSize: 20 }} />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          <Stack direction="row" sx={{ gap: 1, justifyContent: { xs: 'stretch', sm: 'flex-end' }, flexWrap: 'wrap' }}>
+            <Can permission="csv.upload">
+              <Button
+                variant="outlined"
+                startIcon={<UploadIcon />}
+                onClick={() => navigate('/projects/upload')}
+                sx={{
+                  height: 36,
+                  borderRadius: `${tokens.radius.button}px`,
+                  bgcolor: tokens.colors.card,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                }}
+              >
+                Import CSV
+              </Button>
+            </Can>
+            <Can permission="project.create">
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => navigate('/projects/upload')}
+                sx={{
+                  height: 36,
+                  borderRadius: `${tokens.radius.button}px`,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  boxShadow: '0 4px 12px rgba(79,70,229,0.25)',
+                }}
+              >
+                New Project
+              </Button>
+            </Can>
+          </Stack>
+        </Stack>
       </Box>
 
-          {/* Filter chips */}
-          <Stack
-            direction="row"
-            useFlexGap
-            sx={{
-              gap: 1,
-              flexWrap: "wrap",
-              justifyContent: "center",
-              flex: 1
-            }}>
-            {CHIP_FILTERS.map((f) => {
-              const active = chipFilter === f.id;
-              return (
-                <Chip
-                  key={f.id}
-                  label={f.label}
-                  onClick={() => setChipFilter(f.id)}
-                  sx={{
-                    fontWeight: 700,
-                    height: 36,
-                    px: 0.5,
-                    borderRadius: 999,
-                    transition: tokens.motion.fast,
-                    ...(active
-                      ? {
-                          bgcolor: 'primary.main',
-                          color: '#fff',
-                          boxShadow: '0 6px 16px rgba(79,70,229,0.35)',
-                          '&:hover': { bgcolor: 'primary.dark' },
-                        }
-                      : {
-                          bgcolor: '#F1F5F9',
-                          color: 'text.secondary',
-                          '&:hover': { bgcolor: '#E2E8F0' },
-                        }),
-                  }}
-                />
-              );
-            })}
-          </Stack>
-
-          {/* View controls */}
-          <Stack
-            direction="row"
-            sx={{
-              gap: 1,
-              alignItems: "center",
-              justifyContent: { xs: 'space-between', lg: 'flex-end' }
-            }}>
+      {/* Filter panel + active filters — single card */}
+      <Paper elevation={0} sx={{ ...cardSx, mb: 2, overflow: 'hidden' }}>
+        <Box sx={{ p: 2 }}>
+          <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+            <TextField
+              size="small"
+              placeholder="Search by project name or keyword..."
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+              sx={{
+                flex: { xs: '1 1 100%', lg: '2 1 200px' },
+                minWidth: 180,
+                '& .MuiOutlinedInput-root': {
+                  height: 36,
+                  bgcolor: tokens.colors.card,
+                  borderRadius: `${tokens.radius.input}px`,
+                  fontSize: '0.8125rem',
+                },
+              }}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+            <TextField
+              {...filterSelectProps}
+              select
+              label="Delivery Health"
+              value={deliveryFilter}
+              onChange={(e) => setDeliveryFilter(e.target.value)}
+              sx={filterSelectSx}
+            >
+              {DELIVERY_FILTER_OPTIONS.map((o) => (
+                <MenuItem key={o.id} value={o.id}>
+                  {o.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              {...filterSelectProps}
+              select
+              label="Status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              sx={filterSelectSx}
+            >
+              {STATUS_FILTER_OPTIONS.map((o) => (
+                <MenuItem key={o.id} value={o.id}>
+                  {o.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              size="small"
+              label="Start date"
+              type="date"
+              value={dateStart}
+              onChange={(e) => setDateStart(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ ...filterSelectSx, minWidth: { xs: '100%', sm: 130 } }}
+            />
+            <TextField
+              size="small"
+              label="End date"
+              type="date"
+              value={dateEnd}
+              onChange={(e) => setDateEnd(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ ...filterSelectSx, minWidth: { xs: '100%', sm: 130 } }}
+            />
+            <TextField
+              {...filterSelectProps}
+              select
+              label="Sort By"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              sx={filterSelectSx}
+            >
+              {SORT_OPTIONS.map((o) => (
+                <MenuItem key={o.id} value={o.id}>
+                  {o.label}
+                </MenuItem>
+              ))}
+            </TextField>
             <ToggleButtonGroup
               exclusive
               size="small"
@@ -1134,545 +1110,376 @@ export default function Projects() {
               onChange={(_e, v) => v && setView(v)}
               sx={{
                 bgcolor: '#F1F5F9',
-                borderRadius: 2,
-                p: 0.35,
+                borderRadius: `${tokens.radius.button}px`,
+                p: 0.25,
+                flexShrink: 0,
+                height: 36,
                 '& .MuiToggleButton-root': {
                   border: 'none',
-                  borderRadius: '10px !important',
-                  px: 1.25,
-                  py: 0.75,
-                  '&.Mui-selected': { bgcolor: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' },
+                  borderRadius: '8px !important',
+                  px: 1,
+                  py: 0.5,
+                  minWidth: 36,
+                  '&.Mui-selected': {
+                    bgcolor: tokens.colors.primary,
+                    color: '#fff',
+                    boxShadow: '0 2px 8px rgba(79,70,229,0.35)',
+                    '&:hover': { bgcolor: tokens.colors.primaryHover },
+                  },
                 },
               }}
             >
-              <ToggleButton value="grid" aria-label="Grid view">
-                <GridIcon fontSize="small" />
+              <ToggleButton value="grid" aria-label="Card view">
+                <GridIcon sx={{ fontSize: 18 }} />
               </ToggleButton>
-              <ToggleButton value="list" aria-label="List view">
-                <TableIcon fontSize="small" />
+              <ToggleButton value="table" aria-label="Table view">
+                <TableIcon sx={{ fontSize: 18 }} />
               </ToggleButton>
             </ToggleButtonGroup>
-
-            <Button
-              size="small"
-              startIcon={<TuneIcon />}
-              onClick={() => setShowFilters((v) => !v)}
-              variant={showFilters ? 'contained' : 'outlined'}
-              sx={{ bgcolor: showFilters ? undefined : '#fff', whiteSpace: 'nowrap' }}
-            >
-              Filters
-              {appliedFilters.length > 0 && (
-                <Badge badgeContent={appliedFilters.length} color="error" sx={{ ml: 1 }} />
-              )}
-            </Button>
-
-            <Button
-              size="small"
-              startIcon={<SortIcon />}
-              onClick={(e) => setSortAnchor(e.currentTarget)}
-              variant="outlined"
-              sx={{ bgcolor: '#fff', whiteSpace: 'nowrap' }}
-            >
-              Sort
-            </Button>
-
-            <IconButton
-              size="small"
-              onClick={(e) => setMoreAnchor(e.currentTarget)}
-              sx={{ border: '1px solid', borderColor: 'divider', bgcolor: '#fff' }}
-            >
-              <MoreIcon fontSize="small" />
-            </IconButton>
           </Stack>
-        </Stack>
-
-        <Collapse in={showFilters}>
-          <Divider sx={{ my: 2 }} />
-          <Stack
-            direction="row"
-            useFlexGap
-            sx={{
-              gap: 1.5,
-              flexWrap: "wrap",
-              alignItems: "center"
-            }}>
-            <TextField select size="small" label="Client" value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} sx={filterSelectSx}>
-              <MenuItem value="all">All clients</MenuItem>
-              {clients.map((c) => (
-                <MenuItem key={c} value={c}>{c}</MenuItem>
-              ))}
-            </TextField>
-            <TextField select size="small" label="Team" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} sx={filterSelectSx}>
-              <MenuItem value="all">All team</MenuItem>
-              {teams.map((t) => (
-                <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
-              ))}
-            </TextField>
-            <TextField select size="small" label="Priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} sx={filterSelectSx}>
-              <MenuItem value="all">All priorities</MenuItem>
-              {priorities.map((p) => (
-                <MenuItem key={p} value={p}>{p}</MenuItem>
-              ))}
-            </TextField>
-            <TextField select size="small" label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} sx={filterSelectSx}>
-              <MenuItem value="all">All status</MenuItem>
-              {['Active', 'Completed', 'On Hold', 'Delayed'].map((s) => (
-                <MenuItem key={s} value={s}>{s}</MenuItem>
-              ))}
-            </TextField>
-            <TextField select size="small" label="Date Range" value={dateRange} onChange={(e) => setDateRange(e.target.value)} sx={filterSelectSx}>
-              <MenuItem value="all">Any date</MenuItem>
-              <MenuItem value="7d">Due in 7 days</MenuItem>
-              <MenuItem value="30d">Due in 30 days</MenuItem>
-              <MenuItem value="overdue">Overdue</MenuItem>
-            </TextField>
-            {(appliedFilters.length > 0 || chipFilter !== 'all' || search) && (
-              <Button size="small" onClick={resetFilters} startIcon={<CloseIcon />}>
-                Reset filters
-              </Button>
-            )}
-          </Stack>
-        </Collapse>
-
-        {appliedFilters.length > 0 && (
-          <Stack
-            direction="row"
-            useFlexGap
-            sx={{
-              gap: 1,
-              flexWrap: "wrap",
-              mt: 2
-            }}>
-            {appliedFilters.map((f) => (
-              <Chip
-                key={f.key}
-                label={f.label}
-                size="small"
-                onDelete={() => clearApplied(f.key)}
-                sx={{ fontWeight: 650, bgcolor: '#EEF2FF', color: '#4338CA' }}
-              />
-            ))}
-          </Stack>
-        )}
-      </Paper>
-      {/* KPI ROW */}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            sm: 'repeat(2, minmax(0, 1fr))',
-            lg: 'repeat(4, minmax(0, 1fr))',
-          },
-          gap: 3,
-          mb: 4,
-        }}
-      >
-        <MetricCard
-          label="Total Projects"
-          value={totals.total}
-          icon={<FolderIcon />}
-          tint="#EEF2FF"
-          iconColor="#6366F1"
-          trend={totals.avgProgress ? `• ${totals.avgProgress}% avg progress` : undefined}
-          trendUp
-        />
-        <MetricCard
-          label="Active Projects"
-          value={totals.active}
-          icon={<ActiveIcon />}
-          tint="#ECFDF5"
-          iconColor="#059669"
-        />
-        <MetricCard
-          label="Completed Projects"
-          value={totals.completed}
-          icon={<CheckIcon />}
-          tint="#EFF6FF"
-          iconColor="#2563EB"
-        />
-        <MetricCard
-          label="Delayed Projects"
-          value={totals.delayed}
-          icon={<OverdueIcon />}
-          tint="#FEF2F2"
-          iconColor="#DC2626"
-          trend={totals.delayed ? '• Needs attention' : undefined}
-          trendUp={totals.delayed === 0}
-        />
         </Box>
-      {loading ? (
-        <LoadingSkeleton view={view} />
-      ) : projects.length === 0 ? (
-        <EmptyState
-          title="No Projects Found"
-          description="Create your first project or import a CSV backlog to get started."
-          actionText="Create Project"
-          onActionClick={() => navigate('/projects/upload')}
-        />
-      ) : filtered.length === 0 ? (
-        <Paper elevation={0} sx={{ ...glassSx, p: 6, textAlign: 'center' }}>
-          <Typography sx={{ fontWeight: 750, fontSize: '1.15rem', mb: 1 }}>No projects match</Typography>
-          <Typography sx={{ color: 'text.secondary', mb: 3 }}>
-            Try adjusting search or filters to find what you need.
-          </Typography>
-          <Button variant="contained" onClick={resetFilters}>
-            Reset filters
-          </Button>
-        </Paper>
-      ) : (
+
         <Box
           sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', xl: '1fr 300px' },
-            gap: 3,
-            alignItems: 'start',
+            px: 2,
+            py: 1.25,
+            borderTop: '1px solid',
+            borderColor: tokens.colors.border,
+            bgcolor: '#FAFBFC',
           }}
         >
-          <Box sx={{ minWidth: 0 }}>
-            {view === 'grid' ? (
-              <Box
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            sx={{ gap: 1, alignItems: { xs: 'stretch', sm: 'center' }, justifyContent: 'space-between' }}
+          >
+            <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'center', flex: 1 }}>
+              <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
+                <FilterIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700 }}>Active Filters</Typography>
+                <Chip
+                  size="small"
+                  label={appliedFilters.length}
+                  sx={{
+                    height: 20,
+                    minWidth: 20,
+                    fontWeight: 800,
+                    fontSize: '0.7rem',
+                    bgcolor: tokens.colors.primary,
+                    color: '#fff',
+                  }}
+                />
+              </Stack>
+              {appliedFilters.map((f) => (
+                <Chip
+                  key={f.key}
+                  label={f.label}
+                  size="small"
+                  onDelete={() => clearApplied(f.key)}
+                  sx={{ fontWeight: 650, bgcolor: '#EEF2FF', color: '#4338CA', height: 26 }}
+                />
+              ))}
+            </Stack>
+            <Stack direction="row" sx={{ gap: 1.5, flexShrink: 0, alignItems: 'center' }}>
+              <Button
+                size="small"
+                onClick={resetFilters}
+                disabled={appliedFilters.length === 0}
+                sx={{
+                  fontWeight: 600,
+                  color: appliedFilters.length ? 'error.main' : 'text.disabled',
+                  textTransform: 'none',
+                  minWidth: 0,
+                  px: 0.5,
+                }}
+              >
+                Clear All
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                onClick={fetchProjects}
+                startIcon={<RefreshIcon sx={{ fontSize: 16 }} />}
+                sx={{ fontWeight: 600, textTransform: 'none', color: 'text.secondary' }}
+              >
+                Refresh
+              </Button>
+            </Stack>
+          </Stack>
+        </Box>
+      </Paper>
+
+      {/* KPI strip */}
+      {!loading && !fetchError && projects.length > 0 && (
+        <Box
           sx={{
             display: 'grid',
             gridTemplateColumns: {
               xs: '1fr',
               sm: 'repeat(2, minmax(0, 1fr))',
-                    lg: 'repeat(2, minmax(0, 1fr))',
-                    xl: 'repeat(3, minmax(0, 1fr))',
-                  },
-                  gap: 3,
+              md: 'repeat(3, minmax(0, 1fr))',
+              lg: 'repeat(5, minmax(0, 1fr))',
+            },
+            gap: 1.5,
+            mb: 2,
+          }}
+        >
+          <KpiStripCard label="Total Projects" value={kpi.total} sub="All time" icon={<FolderIcon />} tint="#EEF2FF" iconColor="#6366F1" />
+          <KpiStripCard label="On Track" value={kpi.onTrack} sub={`${kpi.onTrackPct}%`} icon={<OnTrackIcon />} tint="#ECFDF5" iconColor="#059669" />
+          <KpiStripCard label="At Risk" value={kpi.atRisk} sub={`${kpi.atRiskPct}%`} icon={<AtRiskIcon />} tint="#FFFBEB" iconColor="#D97706" />
+          <KpiStripCard label="Overdue" value={kpi.overdue} sub={`${kpi.overduePct}%`} icon={<OverdueIcon />} tint="#FEF2F2" iconColor="#DC2626" />
+          <KpiStripCard label="Completed" value={kpi.completed} sub={`${kpi.completedPct}%`} icon={<CheckIcon />} tint="#EFF6FF" iconColor="#2563EB" />
+        </Box>
+      )}
+
+      {loading ? (
+        <LoadingSkeleton view={view} />
+      ) : fetchError ? (
+        <Paper elevation={0} sx={{ ...cardSx, p: 6, textAlign: 'center' }}>
+          <Typography sx={{ fontWeight: 700, fontSize: '1.15rem', mb: 1, color: 'error.main' }}>
+            Unable to load projects
+          </Typography>
+          <Typography sx={{ color: 'text.secondary', mb: 3 }}>{fetchError}</Typography>
+          <Button variant="contained" onClick={fetchProjects} startIcon={<RefreshIcon />}>
+            Retry
+          </Button>
+        </Paper>
+      ) : projects.length === 0 ? (
+        <EmptyState
+          title="No projects yet"
+          description="Create your first project or import a project CSV."
+          actionText="New Project"
+          actionPermission="project.create"
+          onActionClick={() => navigate('/projects/upload')}
+        />
+      ) : filtered.length === 0 ? (
+        <Paper elevation={0} sx={{ ...cardSx, p: 6, textAlign: 'center' }}>
+          <Typography sx={{ fontWeight: 700, fontSize: '1.15rem', mb: 1 }}>No projects found</Typography>
+          <Typography sx={{ color: 'text.secondary', mb: 3, maxWidth: 420, mx: 'auto' }}>
+            Try changing your search or filters.
+          </Typography>
+          <Button variant="contained" onClick={resetFilters} startIcon={<ClearIcon />}>
+            Clear Filters
+          </Button>
+        </Paper>
+      ) : (
+        <>
+          {view === 'grid' ? (
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: {
+                  xs: '1fr',
+                  md: 'repeat(2, minmax(0, 1fr))',
+                  lg: 'repeat(3, minmax(0, 1fr))',
+                  xl: 'repeat(4, minmax(0, 1fr))',
+                },
+                gap: 2.5,
+              }}
+            >
+              {paged.map((proj) => (
+                <ProjectCard
+                  key={proj.id}
+                  proj={proj}
+                  search={effectiveSearch}
+                  isFavorite={favorites.includes(proj.id)}
+                  onToggleFavorite={toggleFavorite}
+                  onOpen={(p) => navigate(`/projects/${p.id}/tasks`)}
+                  onMenu={(e, p) => {
+                    setMenuAnchor(e.currentTarget);
+                    setMenuProj(p);
+                  }}
+                />
+              ))}
+            </Box>
+          ) : (
+            <Paper elevation={0} sx={{ ...cardSx, overflow: 'hidden' }}>
+              <TableContainer sx={{ overflowX: 'auto' }}>
+                <Table stickyHeader sx={{ minWidth: 1000 }}>
+                  <TableHead>
+                    <TableRow>
+                      {[
+                        'Project',
+                        'Project ID',
+                        'Status',
+                        'Delivery Health',
+                        'Owner',
+                        'Start Date',
+                        'Due Date',
+                        'Progress',
+                        'Tasks',
+                        'Actions',
+                      ].map((col) => (
+                        <TableCell key={col}>{col}</TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {paged.map((proj) => {
+                      const color = projectColor(proj.id);
+                      const projectCode = formatProjectId(proj.id);
+                      const isOverdue = proj.deliveryStatus === 'OVERDUE' || proj.isProjectOverdue;
+                      return (
+                        <TableRow
+                          key={proj.id}
+                          hover
+                          sx={{
+                            cursor: 'pointer',
+                            '& td': { borderBottomColor: 'divider' },
+                            transition: tokens.motion.fast,
+                          }}
+                          onClick={() => navigate(`/projects/${proj.id}/tasks`)}
+                        >
+                          <TableCell sx={{ maxWidth: 240 }}>
+                            <Stack direction="row" sx={{ alignItems: 'center', gap: 1.5 }}>
+                              <Avatar
+                                sx={{
+                                  width: 36,
+                                  height: 36,
+                                  bgcolor: color,
+                                  fontWeight: 700,
+                                  borderRadius: `${tokens.radius.sm}px`,
+                                }}
+                              >
+                                <FolderIcon sx={{ fontSize: 18 }} />
+                              </Avatar>
+                              <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>
+                                {highlightMatch(proj.name, effectiveSearch)}
+                              </Typography>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            <Typography sx={{ fontSize: '0.85rem', fontWeight: 600, color: 'text.secondary' }}>
+                              {highlightMatch(projectCode, effectiveSearch)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge proj={proj} />
+                          </TableCell>
+                          <TableCell>
+                            {proj.deliveryStatus ? (
+                              <ProjectHealthBadge status={proj.deliveryStatus} />
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {proj.manager ? (
+                              <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
+                                <Avatar
+                                  sx={{
+                                    width: 24,
+                                    height: 24,
+                                    fontSize: '0.65rem',
+                                    bgcolor: proj.manager.color || color,
+                                  }}
+                                >
+                                  {initials(proj.manager.name)}
+                                </Avatar>
+                                <Typography sx={{ fontSize: '0.85rem' }}>{proj.manager.name}</Typography>
+                              </Stack>
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Typography sx={{ fontSize: '0.85rem' }}>{formatDate(proj.startDate)}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography
+                              sx={{
+                                fontSize: '0.85rem',
+                                fontWeight: isOverdue ? 700 : 400,
+                                color: isOverdue ? 'error.main' : 'text.primary',
+                              }}
+                            >
+                              {formatDate(proj.dueDate)}
+                            </Typography>
+                            {isOverdue && (
+                              <Typography sx={{ fontSize: '0.7rem', color: 'error.main', fontWeight: 700 }}>
+                                {deliveryTimingText(proj)}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <ProgressCell
+                              progress={proj.progress || 0}
+                              completed={proj.completed || 0}
+                              total={proj.totalTasks || 0}
+                              deliveryStatus={proj.deliveryStatus}
+                              compact
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>
+                              {proj.completed || 0} / {proj.totalTasks || 0}
+                            </Typography>
+                          </TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <IconButton
+                              size="small"
+                              aria-label="Actions"
+                              onClick={(e) => {
+                                setMenuAnchor(e.currentTarget);
+                                setMenuProj(proj);
+                              }}
+                            >
+                              <MoreIcon fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          )}
+
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, mt: 3 }}
+          >
+            <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
+              Showing {from} to {to} of {filtered.length} projects
+            </Typography>
+            <Stack direction="row" useFlexGap sx={{ alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <Pagination
+                count={pageCount}
+                page={page}
+                onChange={(_e, v) => setPage(v)}
+                color="primary"
+                shape="rounded"
+                size="small"
+              />
+              <TextField
+                select
+                size="small"
+                label="Rows per page"
+                value={rowsPerPage}
+                onChange={(e) => {
+                  setRowsPerPage(Number(e.target.value));
+                  setPage(1);
+                }}
+                sx={{
+                  minWidth: 130,
+                  '& .MuiOutlinedInput-root': { height: 36, borderRadius: 2, bgcolor: tokens.colors.card },
+                  '& .MuiSelect-select': { fontSize: '0.8rem', fontWeight: 600 },
                 }}
               >
-                {paged.map((proj) => (
-                  <ProjectCard
-                    key={proj.id}
-                    proj={proj}
-                    search={search.trim()}
-                    onOpen={(p) => navigate(`/projects/${p.id}/tasks`)}
-                    onDashboard={(p) => navigate(`/projects/${p.id}/dashboard`)}
-                    onCalendar={(p) => navigate(`/projects/${p.id}/calendar`)}
-                    onShare={(p) => setShareProj(p)}
-                    onMenu={(e, p) => {
-                      setMenuAnchor(e.currentTarget);
-                      setMenuProj(p);
-                    }}
-                  />
+                {[8, 16, 24, 48].map((n) => (
+                  <MenuItem key={n} value={n}>
+                    {n}
+                  </MenuItem>
                 ))}
-              </Box>
-            ) : (
-              <Paper elevation={0} sx={{ ...glassSx, overflow: 'hidden' }}>
-                <TableContainer sx={{ overflowX: 'auto' }}>
-                  <Table stickyHeader sx={{ minWidth: 1100 }}>
-                    <TableHead>
-                      <TableRow>
-                        {['Project', 'Client', 'Manager', 'Status', 'Priority', 'Progress', 'Team', 'Tasks', 'Due Date', 'Hours', 'Actions'].map(
-                          (col) => (
-                            <TableCell key={col}>{col}</TableCell>
-                          )
-                        )}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {paged.map((proj) => {
-                        const color = projectColor(proj.id);
-                        const members = proj.members || [];
-                        return (
-                          <TableRow
-                            key={proj.id}
-                            hover
-                sx={{
-                              '& td': { borderBottomColor: 'divider' },
-                              transition: tokens.motion.fast,
-                              '&:hover': { bgcolor: 'rgba(79,70,229,0.03)' },
-                            }}
-                          >
-                            <TableCell sx={{ maxWidth: 240 }}>
-                              <Stack
-                                direction="row"
-                                sx={{
-                                  alignItems: "center",
-                                  gap: 1.5
-                                }}>
-                                <Avatar sx={{ width: 36, height: 36, bgcolor: color, fontWeight: 700, borderRadius: 2, fontSize: '0.85rem' }}>
-                                  {(proj.name || '?').charAt(0).toUpperCase()}
-                                </Avatar>
-                                <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>
-                                  {highlightMatch(proj.name, search.trim())}
-                    </Typography>
-                              </Stack>
-                            </TableCell>
-                            <TableCell>
-                              <Typography sx={{ fontSize: '0.85rem' }}>
-                                {highlightMatch(proj.clientName || '—', search.trim())}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              {proj.manager ? (
-                                <Stack
-                                  direction="row"
-                                  sx={{
-                                    alignItems: "center",
-                                    gap: 1
-                                  }}>
-                                  <Avatar sx={{ width: 24, height: 24, fontSize: '0.65rem', bgcolor: proj.manager.color || color }}>
-                                    {initials(proj.manager.name)}
-                                  </Avatar>
-                                  <Typography sx={{ fontSize: '0.85rem' }}>{proj.manager.name}</Typography>
-                                </Stack>
-                              ) : (
-                                '—'
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <StatusBadge status={proj.status} archived={proj.archived} />
-                            </TableCell>
-                            <TableCell>
-                              <PriorityBadge priority={proj.priority} />
-                            </TableCell>
-                            <TableCell>
-                              <ProgressCell
-                                progress={proj.progress || 0}
-                                completed={proj.completed || 0}
-                                total={proj.totalTasks || 0}
-                                compact
-                              />
-                            </TableCell>
-                            <TableCell>
-                              {members.length === 0 ? (
-                                '—'
-                              ) : (
-                                <AvatarGroup
-                                  max={4}
-                                  sx={{
-                                    justifyContent: 'flex-start',
-                                    '& .MuiAvatar-root': { width: 28, height: 28, fontSize: '0.7rem', fontWeight: 700 },
-                                  }}
-                                >
-                                  {members.map((m) => (
-                                    <Tooltip key={m.id} title={m.name}>
-                                      <Avatar sx={{ bgcolor: m.color || color }}>{initials(m.name)}</Avatar>
-                                    </Tooltip>
-                                  ))}
-                                </AvatarGroup>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>
-                                {proj.completed || 0} / {proj.totalTasks || 0}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              {proj.isProjectOverdue ? (
-                                <Chip
-                                  icon={<OverdueIcon sx={{ fontSize: '13px !important', color: '#DC2626 !important' }} />}
-                                  label={`${formatDate(proj.dueDate)} (${proj.projectOverdueDays}d overdue)`}
-                                  size="small"
-                                  sx={{ bgcolor: '#FEF2F2', color: '#B91C1C', fontWeight: 800, border: '1px solid #FCA5A5' }}
-                                />
-                              ) : proj.revisedDeliveryDate ? (
-                                <Stack direction="row" alignItems="center" spacing={0.5}>
-                                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#6B21A8' }}>
-                                    {formatDate(proj.dueDate)}
-                                  </Typography>
-                                  <Chip label="Extended" size="small" sx={{ bgcolor: '#F3E8FF', color: '#6B21A8', height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
-                                </Stack>
-                              ) : (
-                                <Typography sx={{ fontSize: '0.85rem', fontWeight: 650 }}>{formatDate(proj.dueDate)}</Typography>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Typography sx={{ fontSize: '0.85rem', fontWeight: 650 }}>
-                                {proj.estimatedHours || 0}h
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Stack direction="row" sx={{
-                                gap: 0.25
-                              }}>
-                                <Tooltip title="Open">
-                                  <IconButton size="small" onClick={() => navigate(`/projects/${proj.id}/tasks`)}>
-                                    <ViewIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                                <Tooltip title="Dashboard">
-                                  <IconButton size="small" onClick={() => navigate(`/projects/${proj.id}/dashboard`)}>
-                                    <DashboardIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                          <IconButton
-                            size="small"
-                                  onClick={(e) => {
-                                    setMenuAnchor(e.currentTarget);
-                                    setMenuProj(proj);
-                                  }}
-                                >
-                                  <MoreIcon fontSize="small" />
-                          </IconButton>
-                    </Stack>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Paper>
-            )}
-
-            {/* Pagination */}
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              sx={{
-                justifyContent: "space-between",
-                alignItems: { xs: 'stretch', sm: 'center' },
-                gap: 2,
-                mt: 3
-              }}>
-              <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
-                Showing {from}–{to} of {filtered.length} projects
-              </Typography>
-              <Stack
-                direction="row"
-                useFlexGap
-                sx={{
-                  alignItems: "center",
-                  gap: 2,
-                  flexWrap: "wrap"
-                }}>
-                <Pagination
-                  count={pageCount}
-                  page={page}
-                  onChange={(_e, v) => setPage(v)}
-                  color="primary"
-                  shape="rounded"
-                  size="small"
-                />
-                <TextField
-                  select
-                  size="small"
-                  value={rowsPerPage}
-                  onChange={(e) => {
-                    setRowsPerPage(Number(e.target.value));
-                    setPage(1);
-                  }}
-                  sx={{
-                    minWidth: 110,
-                    '& .MuiOutlinedInput-root': { height: 36, borderRadius: 2, bgcolor: '#fff' },
-                    '& .MuiSelect-select': { fontSize: '0.8rem', fontWeight: 600 },
-                  }}
-                >
-                  {[6, 12, 24, 48].map((n) => (
-                    <MenuItem key={n} value={n}>
-                      {n} / page
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Stack>
+              </TextField>
             </Stack>
-                    </Box>
-
-          {/* RIGHT INSIGHTS PANEL */}
-          <Stack
-            spacing={2.5}
-                    sx={{
-              display: { xs: 'none', xl: 'flex' },
-              position: 'sticky',
-              top: 88,
-            }}
-          >
-            <Paper elevation={0} sx={{ ...glassSx, p: 2.5 }}>
-              <Typography sx={{ fontWeight: 750, fontSize: '0.9rem', mb: 2 }}>Upcoming Deadlines</Typography>
-              <Stack spacing={1.5}>
-                {upcomingDeadlines.length === 0 ? (
-                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No upcoming due dates</Typography>
-                ) : (
-                  upcomingDeadlines.map((p) => (
-                    <Box
-                      key={p.id}
-                      onClick={() => navigate(`/projects/${p.id}/tasks`)}
-                        sx={{
-                        p: 1.5,
-                        borderRadius: 2,
-                        bgcolor: '#F8FAFC',
-                          border: '1px solid',
-                          borderColor: 'divider',
-                        cursor: 'pointer',
-                        transition: tokens.motion.fast,
-                        '&:hover': { borderColor: 'primary.main', bgcolor: '#EEF2FF' },
-                      }}
-                    >
-                      <Typography sx={{ fontWeight: 700, fontSize: '0.8rem', mb: 0.25 }}>{p.name}</Typography>
-                      <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
-                        Due {formatDate(p.dueDate)}
-                        </Typography>
-                    </Box>
-                  ))
-                )}
-              </Stack>
-            </Paper>
-
-            <Paper elevation={0} sx={{ ...glassSx, p: 2.5 }}>
-              <Typography sx={{ fontWeight: 750, fontSize: '0.9rem', mb: 2 }}>Recently Updated</Typography>
-              <Stack spacing={1.25}>
-                {recentlyUpdated.map((p) => (
-                  <Stack
-                    key={p.id}
-                    direction="row"
-                    onClick={() => navigate(`/projects/${p.id}/tasks`)}
-                    sx={{
-                      gap: 1.25,
-                      alignItems: "center",
-                      cursor: 'pointer',
-                      '&:hover .name': { color: 'primary.main' }
-                    }}>
-                    <Avatar sx={{ width: 28, height: 28, fontSize: '0.7rem', bgcolor: projectColor(p.id), borderRadius: 1.5 }}>
-                      {(p.name || '?').charAt(0).toUpperCase()}
-                    </Avatar>
-                    <Box sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography className="name" sx={{ fontWeight: 650, fontSize: '0.8rem', transition: tokens.motion.fast }}>
-                        {p.name}
-                      </Typography>
-                      <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
-                        {timeAgo(p.lastUpdated)}
-                        </Typography>
-                      </Box>
-                    <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{p.progress || 0}%</Typography>
-                  </Stack>
-                ))}
-              </Stack>
-            </Paper>
-
-            <Paper elevation={0} sx={{ ...glassSx, p: 2.5 }}>
-              <Typography sx={{ fontWeight: 750, fontSize: '0.9rem', mb: 1.5 }}>Project Insights</Typography>
-              <Stack spacing={1}>
-                <Stack direction="row" sx={{
-                  justifyContent: "space-between"
-                }}>
-                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Portfolio progress</Typography>
-                  <Typography sx={{ fontSize: '0.8rem', fontWeight: 700 }}>{totals.avgProgress}%</Typography>
-                </Stack>
-                <LinearProgress
-                  variant="determinate"
-                  value={totals.avgProgress}
-                  sx={{
-                    height: 8,
-                    borderRadius: 99,
-                    bgcolor: '#E2E8F0',
-                    '& .MuiLinearProgress-bar': { bgcolor: '#4F46E5', borderRadius: 99 },
-                  }}
-                />
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pt: 1 }}>
-                  {totals.active} active · {totals.delayed} delayed · {totals.completed} completed
-                    </Typography>
-              </Stack>
-            </Paper>
           </Stack>
-                  </Box>
+        </>
       )}
-      {/* Mobile FAB */}
-      <Can permission="csv.upload">
+
+      <Can permission="project.create">
         <Fab
-                    color="primary"
+          color="primary"
           aria-label="New project"
           onClick={() => navigate('/projects/upload')}
           sx={{
@@ -1680,43 +1487,15 @@ export default function Projects() {
             position: 'fixed',
             bottom: 24,
             right: 24,
-            background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
-            boxShadow: '0 12px 28px rgba(79,70,229,0.4)',
           }}
         >
           <AddIcon />
         </Fab>
       </Can>
-      {/* Sort menu */}
-      <Menu anchorEl={sortAnchor} open={Boolean(sortAnchor)} onClose={() => setSortAnchor(null)}>
-        {[
-          { id: 'updated', label: 'Recently updated' },
-          { id: 'name', label: 'Name A–Z' },
-          { id: 'progress', label: 'Progress' },
-          { id: 'due', label: 'Due date' },
-          { id: 'priority', label: 'Priority' },
-        ].map((opt) => (
-          <MenuItem
-            key={opt.id}
-            selected={sortBy === opt.id}
-            onClick={() => {
-              setSortBy(opt.id);
-              setSortAnchor(null);
-            }}
-          >
-            {opt.label}
-          </MenuItem>
-        ))}
-      </Menu>
+
       <Menu anchorEl={moreAnchor} open={Boolean(moreAnchor)} onClose={() => setMoreAnchor(null)}>
-        <MenuItem
-          onClick={() => {
-            setView(view === 'grid' ? 'list' : 'grid');
-            setMoreAnchor(null);
-          }}
-        >
-          {view === 'grid' ? <TableIcon fontSize="small" sx={{ mr: 1.5 }} /> : <GridIcon fontSize="small" sx={{ mr: 1.5 }} />}
-          Switch to {view === 'grid' ? 'list' : 'grid'} view
+        <MenuItem onClick={() => { fetchProjects(); setMoreAnchor(null); }}>
+          <RefreshIcon fontSize="small" sx={{ mr: 1.5 }} /> Refresh
         </MenuItem>
         <MenuItem
           onClick={() => {
@@ -1724,6 +1503,7 @@ export default function Projects() {
             setMoreAnchor(null);
             showAlert(`Exported ${filtered.length} projects`);
           }}
+          disabled={!filtered.length}
         >
           <ExportIcon fontSize="small" sx={{ mr: 1.5 }} /> Export CSV
         </MenuItem>
@@ -1736,6 +1516,7 @@ export default function Projects() {
           <ClearIcon fontSize="small" sx={{ mr: 1.5 }} /> Clear all filters
         </MenuItem>
       </Menu>
+
       <Menu
         anchorEl={menuAnchor}
         open={Boolean(menuAnchor)}
@@ -1769,11 +1550,37 @@ export default function Projects() {
         </MenuItem>
         <MenuItem
           onClick={() => {
+            navigate(`/projects/${menuProj?.id}/timeline`);
+            setMenuAnchor(null);
+          }}
+        >
+          <TimelineIcon fontSize="small" sx={{ mr: 1.5 }} /> Timeline
+        </MenuItem>
+        <Can permission="project.edit">
+          <MenuItem
+            onClick={() => {
+              setEditProj(menuProj);
+              setMenuAnchor(null);
+            }}
+          >
+            <EditIcon fontSize="small" sx={{ mr: 1.5 }} /> Edit Project
+          </MenuItem>
+        </Can>
+        <MenuItem
+          onClick={() => {
             setDateDialogProj(menuProj);
             setMenuAnchor(null);
           }}
         >
           <CalendarIcon fontSize="small" sx={{ mr: 1.5 }} /> Update Delivery Date
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            openDelayAnalysis(menuProj);
+            setMenuAnchor(null);
+          }}
+        >
+          <OverdueIcon fontSize="small" sx={{ mr: 1.5 }} /> View Delay Analysis
         </MenuItem>
         <Can permission="project.share">
           <MenuItem
@@ -1801,6 +1608,13 @@ export default function Projects() {
           </MenuItem>
         </Can>
       </Menu>
+
+      <EditProjectDialog
+        open={Boolean(editProj)}
+        onClose={() => setEditProj(null)}
+        project={editProj}
+        onUpdated={fetchProjects}
+      />
       <ShareProjectDialog
         open={Boolean(shareProj)}
         onClose={() => setShareProj(null)}
@@ -1811,6 +1625,15 @@ export default function Projects() {
         onClose={() => setDateDialogProj(null)}
         project={dateDialogProj}
         onUpdated={fetchProjects}
+      />
+      <DelayAnalysisDrawer
+        open={delayDrawerOpen}
+        onClose={() => {
+          setDelayDrawerOpen(false);
+          setDelayAnalysis(null);
+          setDelayDrawerProj(null);
+        }}
+        analysis={delayAnalysis}
       />
       <Dialog open={openDelete} onClose={handleCloseDelete} fullWidth maxWidth="xs">
         <DialogTitle>Delete Project?</DialogTitle>

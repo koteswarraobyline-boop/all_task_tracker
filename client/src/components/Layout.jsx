@@ -40,7 +40,9 @@ import {
   ChevronLeft as ChevronLeftIcon,
   MenuOpen as MenuOpenIcon,
   Logout as LogoutIcon,
-  InfoOutlined as InfoIcon,
+  ViewKanban as TaskBoardNavIcon,
+  Timeline as TimelineNavIcon,
+  Home as HomeIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
 import { useRole } from '../context/RoleContext';
@@ -50,6 +52,28 @@ import { tokens } from '../theme';
 const DRAWER_WIDTH = tokens.layout.sidebar;
 const DRAWER_COLLAPSED = tokens.layout.sidebarCollapsed;
 const SIDEBAR_GRADIENT = `linear-gradient(180deg, ${tokens.colors.sidebar} 0%, ${tokens.colors.sidebarEnd} 100%)`;
+
+function NavSectionLabel({ children, collapsed }) {
+  if (collapsed) return null;
+  return (
+    <Typography
+      variant="caption"
+      sx={{
+        px: 1.5,
+        mb: 1,
+        mt: 2,
+        display: 'block',
+        color: '#94A3B8',
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        fontSize: '0.72rem',
+        letterSpacing: '0.06em',
+      }}
+    >
+      {children}
+    </Typography>
+  );
+}
 
 function NavItem({ text, icon, path, active, onNavigate, collapsed }) {
   const labelColor = active ? '#FFFFFF' : '#E2E8F0';
@@ -148,7 +172,12 @@ export default function Layout({ children, mode, toggleMode }) {
   const matchTasks = matchPath('/projects/:id/tasks', location.pathname);
   const matchCalendar = matchPath('/projects/:id/calendar', location.pathname);
   const matchTimeline = matchPath('/projects/:id/timeline', location.pathname);
+  const matchFiles = matchPath('/projects/:id/files', location.pathname);
+  const matchSettings = matchPath('/projects/:id/settings', location.pathname);
   const matchUpload = matchPath('/projects/upload', location.pathname);
+  const isProjectsListPage = location.pathname === '/projects';
+  const hideTopAppBar =
+    location.pathname === '/dashboard' || isProjectsListPage || Boolean(matchDashboard);
   const clientMatch = matchPath('/client/:token/*', location.pathname);
   const clientToken = clientMatch?.params?.token || clientMeta?.token;
 
@@ -157,6 +186,8 @@ export default function Layout({ children, mode, toggleMode }) {
     matchTasks?.params?.id ||
     matchCalendar?.params?.id ||
     matchTimeline?.params?.id ||
+    matchFiles?.params?.id ||
+    matchSettings?.params?.id ||
     (isClient ? clientMeta?.projectId : null);
 
   useEffect(() => {
@@ -166,6 +197,7 @@ export default function Layout({ children, mode, toggleMode }) {
     }
 
     if (activeProjectId && !isClient) {
+      localStorage.setItem('tt_last_project_id', String(activeProjectId));
       const loadProject = async () => {
         try {
           const projects = await api.getProjects();
@@ -277,34 +309,62 @@ export default function Layout({ children, mode, toggleMode }) {
         }}
       >
         {!isClient && (
-          <List sx={{ p: 0, mb: 2.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <NavItem
-              text="Projects"
-              icon={<ProjectsIcon />}
-              path="/projects"
-              active={location.pathname === '/projects' || location.pathname === '/' || Boolean(matchUpload)}
-              onNavigate={go}
-              collapsed={collapsed}
-            />
-            <NavItem
-              text="Developers"
-              icon={<DevelopersIcon />}
-              path="/developers"
-              active={location.pathname === '/developers'}
-              onNavigate={go}
-              collapsed={collapsed}
-            />
-            <Can permission="users.manage">
+          <>
+            <List sx={{ p: 0, mb: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
               <NavItem
-                text="User Management"
-                icon={<UsersIcon />}
-                path="/users"
-                active={location.pathname === '/users'}
+                text="Dashboard"
+                icon={<HomeIcon />}
+                path="/dashboard"
+                active={location.pathname === '/dashboard'}
                 onNavigate={go}
                 collapsed={collapsed}
               />
-            </Can>
-          </List>
+              <NavItem
+                text="Projects"
+                icon={<ProjectsIcon />}
+                path="/projects"
+                active={location.pathname === '/projects' || location.pathname === '/' || Boolean(matchUpload)}
+                onNavigate={go}
+                collapsed={collapsed}
+              />
+            </List>
+
+            <NavSectionLabel collapsed={collapsed}>People</NavSectionLabel>
+            <List sx={{ p: 0, mb: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+              <NavItem
+                text="Developers"
+                icon={<DevelopersIcon />}
+                path="/developers"
+                active={location.pathname === '/developers'}
+                onNavigate={go}
+                collapsed={collapsed}
+              />
+            </List>
+
+            <NavSectionLabel collapsed={collapsed}>Administration</NavSectionLabel>
+            <List sx={{ p: 0, mb: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+              <Can permission="users.manage">
+                <NavItem
+                  text="User Management"
+                  icon={<UsersIcon />}
+                  path="/users"
+                  active={location.pathname === '/users'}
+                  onNavigate={go}
+                  collapsed={collapsed}
+                />
+              </Can>
+              <Can permission="settings.view">
+                <NavItem
+                  text="Settings"
+                  icon={<SettingsIcon />}
+                  path="/settings"
+                  active={location.pathname === '/settings'}
+                  onNavigate={go}
+                  collapsed={collapsed}
+                />
+              </Can>
+            </List>
+          </>
         )}
 
         {(activeProject || (isClient && clientProject)) && projectBasePath && (
@@ -404,8 +464,9 @@ export default function Layout({ children, mode, toggleMode }) {
                   ]
                 : [
                     { text: 'Overview', icon: <DashboardIcon />, path: `${projectBasePath}/dashboard` },
-                    { text: 'Tasks', icon: <TasksIcon />, path: `${projectBasePath}/tasks` },
+                    { text: 'Task Board', icon: <TaskBoardNavIcon />, path: `${projectBasePath}/tasks` },
                     { text: 'Calendar', icon: <CalendarIcon />, path: `${projectBasePath}/calendar` },
+                    { text: 'Timeline', icon: <TimelineNavIcon />, path: `${projectBasePath}/timeline` },
                   ]
               ).map((item) => (
                 <NavItem
@@ -416,7 +477,11 @@ export default function Layout({ children, mode, toggleMode }) {
                   active={
                     item.text === 'Overview'
                       ? location.pathname.includes('/overview') || location.pathname.includes('/dashboard')
-                      : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
+                      : item.text === 'Task Board'
+                        ? Boolean(matchTasks)
+                        : item.text === 'Timeline'
+                          ? Boolean(matchTimeline)
+                          : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
                   }
                   onNavigate={(path) => {
                     go(path);
@@ -444,19 +509,6 @@ export default function Layout({ children, mode, toggleMode }) {
             
           </Paper>
         )}
-
-        <Can permission="settings.view">
-          <List sx={{ p: 0, mb: 1 }}>
-            <NavItem
-              text="Settings"
-              icon={<SettingsIcon />}
-              path="/settings"
-              active={location.pathname === '/settings'}
-              onNavigate={go}
-              collapsed={collapsed}
-            />
-          </List>
-        </Can>
 
         <Divider sx={{ borderColor: 'rgba(148,163,184,0.16)', mb: 1.5 }} />
 
@@ -598,6 +650,7 @@ export default function Layout({ children, mode, toggleMode }) {
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }} className="theme-transition">
+      {!hideTopAppBar && (
       <AppBar
         position="fixed"
         sx={{
@@ -652,7 +705,7 @@ export default function Layout({ children, mode, toggleMode }) {
                   />
                   <span>{(activeProject || clientProject)?.name || 'Shared Project'}</span>
                 </Stack>
-              ) : activeProject ? (
+              ) : location.pathname === '/dashboard' ? null : activeProject ? (
                 <Stack
                   direction="row"
                   sx={{
@@ -714,6 +767,7 @@ export default function Layout({ children, mode, toggleMode }) {
           </Stack>
         </Toolbar>
       </AppBar>
+      )}
       <Menu
         anchorEl={userAnchorEl}
         open={Boolean(userAnchorEl)}
@@ -796,7 +850,7 @@ export default function Layout({ children, mode, toggleMode }) {
         component="main"
         sx={{
           flexGrow: 1,
-          pt: `${tokens.layout.header}px`,
+          pt: hideTopAppBar ? 0 : `${tokens.layout.header}px`,
           pl: { xs: 0, md: `${drawerWidth}px` },
           pr: 0,
           pb: 0,

@@ -32,6 +32,7 @@ import {
   ALL_STATUSES,
   PRIORITY_BADGES_LIGHT,
   PRIORITY_BADGES_DARK,
+  normalizeLegacyStatus,
 } from '../components/TaskBoard';
 import { useProjectId } from '../hooks/useProjectId';
 import { usePermission } from '../hooks/usePermission';
@@ -40,31 +41,19 @@ import EmptyState from '../components/EmptyState';
 import StatusRemarkDialog, { needsStatusRemark } from '../components/StatusRemarkDialog';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
 import { getTaskProgressPercent } from '../utils/taskProgress';
+import { isOverdue, getOverdueDays } from '../utils/taskManagementConstants';
 
 const EMPTY_FILTERS = {
-  sprint: '',
   phases: [],
   modules: [],
   developer: '',
   statuses: [],
   priority: '',
+  overdueOnly: false,
 };
 
-function normalizeWeekKey(raw) {
-  let weekKey = (raw || 'Unscheduled').trim();
-  if (!weekKey) weekKey = 'Unscheduled';
-  const lower = weekKey.toLowerCase();
-  if (lower.startsWith('week') || lower.startsWith('sprint')) {
-    const num = weekKey.match(/\d+/);
-    if (num) weekKey = `W${num[0]}`;
-  } else if (lower.startsWith('w') && weekKey.length > 1) {
-    weekKey = weekKey.toUpperCase();
-  }
-  return weekKey;
-}
-
 /** Build Phase → Module → Task tree from work items + module metadata */
-function buildPhaseTree(workTasks, allTasks, developers) {
+function buildPhaseTree(workTasks, allTasks, developers, { sortByOverdue = false } = {}) {
   const modulesById = {};
   allTasks.forEach((t) => {
     if (t.recordType === 'module') modulesById[t.taskId] = t;
@@ -139,11 +128,12 @@ function buildPhaseTree(workTasks, allTasks, developers) {
     .map((phase) => {
       const modules = Object.values(phase.modules)
         .map((mod) => {
-          mod.tasks.sort((a, b) =>
-            String(a.taskId || '').localeCompare(String(b.taskId || ''), undefined, {
+          mod.tasks.sort((a, b) => {
+            if (sortByOverdue) return getOverdueDays(b) - getOverdueDays(a);
+            return String(a.taskId || '').localeCompare(String(b.taskId || ''), undefined, {
               numeric: true,
-            })
-          );
+            });
+          });
           const completed = mod.tasks.filter((t) => t.status === 'Completed').length;
           const total = mod.tasks.length;
           // Weighted average: each task contributes its workflow-stage progress (0–100)
@@ -168,9 +158,14 @@ function buildPhaseTree(workTasks, allTasks, developers) {
             ownerName: owner ? getDeveloperDisplayName(owner) : '',
           };
         })
-        .sort((a, b) =>
-          String(a.moduleId).localeCompare(String(b.moduleId), undefined, { numeric: true })
-        );
+        .sort((a, b) => {
+          if (sortByOverdue) {
+            const maxA = Math.max(0, ...a.tasks.map((t) => getOverdueDays(t)));
+            const maxB = Math.max(0, ...b.tasks.map((t) => getOverdueDays(t)));
+            return maxB - maxA || String(a.moduleId).localeCompare(String(b.moduleId), undefined, { numeric: true });
+          }
+          return String(a.moduleId).localeCompare(String(b.moduleId), undefined, { numeric: true });
+        });
 
       let taskCount = 0;
       let completedTasks = 0;
@@ -197,7 +192,14 @@ function buildPhaseTree(workTasks, allTasks, developers) {
       };
     })
     .filter((p) => p.taskCount > 0)
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    .sort((a, b) => {
+      if (sortByOverdue) {
+        const maxA = Math.max(0, ...a.modules.flatMap((m) => m.tasks.map((t) => getOverdueDays(t))));
+        const maxB = Math.max(0, ...b.modules.flatMap((m) => m.tasks.map((t) => getOverdueDays(t))));
+        return maxB - maxA || a.name.localeCompare(b.name, undefined, { numeric: true });
+      }
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
 }
 
 export default function ProjectTaskBoard() {
@@ -220,9 +222,6 @@ export default function ProjectTaskBoard() {
   const [developers, setDevelopers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [customSprints, setCustomSprints] = useState([]);
-  const [addSprintOpen, setAddSprintOpen] = useState(false);
-  const [newSprintName, setNewSprintName] = useState('');
 
   const [searchParams] = useSearchParams();
   const [boardLayout, setBoardLayout] = useState(() => {
@@ -240,6 +239,13 @@ export default function ProjectTaskBoard() {
     const view = searchParams.get('view');
     if (view === 'kanban') setBoardLayout('kanban');
     else if (view === 'list' || view === 'table') setBoardLayout('table');
+    if (searchParams.get('overdueOnly') === '1') {
+      setFilters((prev) => ({ ...prev, overdueOnly: true }));
+    }
+    const status = searchParams.get('status');
+    if (status) {
+      setFilters((prev) => ({ ...prev, statuses: [status] }));
+    }
   }, [searchParams]);
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -263,12 +269,12 @@ export default function ProjectTaskBoard() {
     initialRemark: '',
     saving: false,
   });
+  const [delayAnalysis, setDelayAnalysis] = useState(null);
   const [newTask, setNewTask] = useState({
     taskName: '',
     taskId: '',
     status: 'Upcoming',
     developerId: '',
-    week: '',
     phase: '',
     priority: '',
     module: '',
@@ -302,21 +308,24 @@ export default function ProjectTaskBoard() {
         const data = await api.getClientTasks(token, sharePassword);
         setProject(data.project);
         setTasks(data.tasks || []);
-        setDevelopers(data.developers || []);
+        setDevelopers([]);
+        setDelayAnalysis(data.delayAnalysis || null);
         return;
       }
 
       if (!projectId) return;
 
-      const projectsData = await api.getProjects();
+      const [projectsData, devsData, tasksResponse, analysis] = await Promise.all([
+        api.getProjects(),
+        api.getDevelopers(),
+        api.getProjectTasks(projectId, { limit: -1 }),
+        api.getProjectDelayAnalysis(projectId).catch(() => null),
+      ]);
       const curProj = projectsData.find((p) => p.id === parseInt(projectId, 10));
       setProject(curProj || { name: `Project #${projectId}` });
-
-      const devsData = await api.getDevelopers();
       setDevelopers(devsData);
-
-      const tasksResponse = await api.getProjectTasks(projectId, { limit: -1 });
       setTasks(tasksResponse.tasks);
+      setDelayAnalysis(analysis);
     } catch (e) {
       console.error('Failed to load board tasks data:', e);
       setLoadError(true);
@@ -414,39 +423,6 @@ export default function ProjectTaskBoard() {
     }
   };
 
-  const handleWeekChange = async (taskId, newWeek, event) => {
-    if (event) event.stopPropagation();
-    if (!canEdit) return;
-    try {
-      const updated = await api.updateTask(taskId, { week: newWeek || null });
-      showAlert('Sprint updated');
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
-      if (selectedTask && selectedTask.id === taskId) setSelectedTask(updated);
-    } catch (error) {
-      console.error('Week update failed:', error);
-      showAlert('Failed to update sprint', 'error');
-    }
-  };
-
-  const handleAddSprint = () => {
-    const trimmed = newSprintName.trim();
-    if (!trimmed) {
-      showAlert('Enter a sprint name (e.g. W4 or Sprint 4)', 'warning');
-      return;
-    }
-    const key = normalizeWeekKey(trimmed);
-    const exists =
-      customSprints.includes(key) || tasks.some((t) => normalizeWeekKey(t.week) === key);
-    if (exists) {
-      showAlert(`Sprint ${key} already exists`, 'warning');
-      return;
-    }
-    setCustomSprints((prev) => [...prev, key]);
-    setNewSprintName('');
-    setAddSprintOpen(false);
-    showAlert(`Sprint ${key} added — use Sprint column to assign tasks`);
-  };
-
   const handleRowClick = (taskItem, startEdit = false) => {
     setSelectedTask(taskItem);
     setDrawerStartEdit(Boolean(startEdit));
@@ -457,6 +433,24 @@ export default function ProjectTaskBoard() {
     setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
     setSelectedTask(updatedTask);
     showAlert('Task saved successfully');
+  };
+
+  const handleDeleteTask = async (taskItem) => {
+    if (!taskItem?.id) return;
+    const taskNameStr = taskItem.taskName || taskItem.taskId || 'this task';
+    if (!window.confirm(`Are you sure you want to delete "${taskNameStr}"?`)) return;
+    try {
+      await api.deleteTask(taskItem.id);
+      showAlert('Task deleted successfully');
+      setTasks((prev) => prev.filter((t) => t.id !== taskItem.id));
+      if (selectedTask && selectedTask.id === taskItem.id) {
+        setSelectedTask(null);
+        setDrawerOpen(false);
+      }
+    } catch (err) {
+      console.error('Failed to delete task:', err);
+      showAlert('Failed to delete task', 'error');
+    }
   };
 
   const handleFilterChange = (key, value) => {
@@ -471,11 +465,7 @@ export default function ProjectTaskBoard() {
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       if (boardLayout !== 'kanban' && filters.statuses.length > 0) {
-        if (!filters.statuses.includes(task.status)) return false;
-      }
-
-      if (filters.sprint) {
-        if (normalizeWeekKey(task.week) !== filters.sprint) return false;
+        if (!filters.statuses.includes(normalizeLegacyStatus(task.status))) return false;
       }
 
       if (filters.phases.length > 0) {
@@ -503,20 +493,22 @@ export default function ProjectTaskBoard() {
         if (task.priority !== filters.priority) return false;
       }
 
+      if (filters.overdueOnly && !isOverdue(task)) {
+        return false;
+      }
+
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
         const dev = developers.find(
           (d) => d.id === task.developerId || d.id === parseInt(task.developerId, 10)
         );
         const devName = getDeveloperDisplayName(dev).toLowerCase();
-        const sprint = normalizeWeekKey(task.week).toLowerCase();
         const match =
           task.taskId?.toLowerCase().includes(query) ||
           task.taskName?.toLowerCase().includes(query) ||
           task.module?.toLowerCase().includes(query) ||
           task.phase?.toLowerCase().includes(query) ||
           task.description?.toLowerCase().includes(query) ||
-          sprint.includes(query) ||
           devName.includes(query);
         if (!match) return false;
       }
@@ -525,10 +517,45 @@ export default function ProjectTaskBoard() {
     });
   }, [tasks, filters, searchQuery, boardLayout, developers]);
 
-  const workTasks = useMemo(
-    () => filteredTasks.filter((t) => t.recordType !== 'module'),
-    [filteredTasks]
-  );
+  const workTasks = useMemo(() => {
+    const list = filteredTasks.filter((t) => t.recordType !== 'module');
+    if (filters.overdueOnly) {
+      return [...list].sort((a, b) => getOverdueDays(b) - getOverdueDays(a));
+    }
+    return list;
+  }, [filteredTasks, filters.overdueOnly]);
+
+  const delayTaskMap = useMemo(() => {
+    const map = {};
+    if (!delayAnalysis) return map;
+
+    (delayAnalysis.contributingTasks || []).forEach((t, idx) => {
+      map[t.id] = {
+        overdueDays: t.overdueDays,
+        delayImpactScore: t.delayImpactScore,
+        isPrimary: idx === 0,
+        isContributor: idx > 0 && idx <= 5,
+        explanation: t.explanation,
+      };
+    });
+
+    if (delayAnalysis.primaryDelayedWork && !map[delayAnalysis.primaryDelayedWork.id]) {
+      const t = delayAnalysis.primaryDelayedWork;
+      map[t.id || t.taskName] = {
+        overdueDays: t.daysBehindSchedule,
+        isPrimary: true,
+        explanation: t.explanation,
+      };
+    }
+
+    return map;
+  }, [delayAnalysis]);
+
+  const primaryDelayTaskId =
+    delayAnalysis?.primaryDelayTaskId ||
+    delayAnalysis?.primaryDelayDriver?.id ||
+    delayAnalysis?.primaryDelayedWork?.id ||
+    null;
 
   const pagedWorkTasks = useMemo(
     () => workTasks.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
@@ -536,8 +563,8 @@ export default function ProjectTaskBoard() {
   );
 
   const phaseTree = useMemo(
-    () => buildPhaseTree(pagedWorkTasks, tasks, developers),
-    [pagedWorkTasks, tasks, developers]
+    () => buildPhaseTree(pagedWorkTasks, tasks, developers, { sortByOverdue: filters.overdueOnly }),
+    [pagedWorkTasks, tasks, developers, filters.overdueOnly]
   );
 
   useEffect(() => {
@@ -564,17 +591,11 @@ export default function ProjectTaskBoard() {
     });
   }, [phaseTree]);
 
-  const availableSprintOptions = useMemo(() => {
-    const keys = new Set(customSprints);
-    tasks.forEach((t) => {
-      if (t.week) keys.add(normalizeWeekKey(t.week));
-    });
-    return Array.from(keys)
-      .filter((k) => k !== 'Unscheduled')
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [tasks, customSprints]);
-
   const filterOptions = useMemo(() => {
+    const overdueCount = tasks.filter(
+      (t) => t.recordType !== 'module' && isOverdue(t)
+    ).length;
+
     const phases = [
       ...new Set(tasks.map((t) => t.phase || 'Unassigned Phase').filter(Boolean)),
     ]
@@ -606,7 +627,6 @@ export default function ProjectTaskBoard() {
       .map((p) => ({ value: p, label: p }));
 
     return {
-      sprints: availableSprintOptions.map((s) => ({ value: s, label: s })),
       phases,
       modules,
       developers: developers.map((d) => ({
@@ -614,17 +634,18 @@ export default function ProjectTaskBoard() {
         label: getDeveloperDisplayName(d),
       })),
       priorities,
+      overdueCount,
     };
-  }, [tasks, developers, availableSprintOptions]);
+  }, [tasks, developers]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
-    if (filters.sprint) n += 1;
     if (filters.phases.length) n += 1;
     if (filters.modules.length) n += 1;
     if (filters.developer !== '' && filters.developer != null) n += 1;
     if (filters.statuses.length) n += 1;
     if (filters.priority) n += 1;
+    if (filters.overdueOnly) n += 1;
     if (searchQuery.trim()) n += 1;
     return n;
   }, [filters, searchQuery]);
@@ -633,7 +654,7 @@ export default function ProjectTaskBoard() {
     const base = tasks.filter((t) => t.recordType !== 'module');
     const counts = {};
     ALL_STATUSES.forEach((s) => {
-      counts[s] = base.filter((t) => t.status === s).length;
+      counts[s] = base.filter((t) => normalizeLegacyStatus(t.status) === s).length;
     });
     return counts;
   }, [tasks]);
@@ -656,7 +677,6 @@ export default function ProjectTaskBoard() {
       taskId: '',
       status: 'Upcoming',
       developerId: '',
-      week: '',
       phase: '',
       priority: '',
       module: '',
@@ -676,17 +696,12 @@ export default function ProjectTaskBoard() {
         taskName: newTask.taskName.trim(),
         taskId: newTask.taskId.trim() || undefined,
         developerId: newTask.developerId || null,
-        week: newTask.week || null,
         phase: newTask.phase || null,
         priority: newTask.priority || null,
         module: newTask.module || null,
         description: newTask.description || null,
       });
       setTasks((prev) => [...prev, created]);
-      if (created.week) {
-        const key = String(created.week).trim();
-        if (key) setCustomSprints((prev) => (prev.includes(key) ? prev : [...prev, key]));
-      }
       setAddTaskOpen(false);
       resetNewTaskForm();
       showAlert('Task created successfully');
@@ -811,7 +826,6 @@ export default function ProjectTaskBoard() {
         onCalendar={goCalendar}
         onImportCsv={() => navigate(`/projects/upload?projectId=${projectId}`)}
         onAddTask={() => setAddTaskOpen(true)}
-        onAddSprint={() => setAddSprintOpen(true)}
         isClient={isClient}
         statusCounts={statusCounts}
         onStatusChipClick={toggleStatusChip}
@@ -825,7 +839,7 @@ export default function ProjectTaskBoard() {
           description={
             isClient
               ? 'The shared project has no tasks yet. Check back once the admin imports or adds work items.'
-              : 'Upload a CSV or add tasks to start planning sprints and tracking progress.'
+              : 'Upload a CSV or add tasks to start tracking progress.'
           }
           actionText={isClient ? undefined : 'Add Task'}
           onActionClick={isClient ? undefined : () => setAddTaskOpen(true)}
@@ -892,11 +906,9 @@ export default function ProjectTaskBoard() {
             setExpandedModules((prev) => ({ ...prev, [id]: !(prev[id] !== false) }))
           }
           onRowClick={handleRowClick}
+          onDeleteTask={handleDeleteTask}
           onStatusChange={handleStatusChange}
           onDeveloperChange={handleDeveloperChange}
-          onWeekChange={handleWeekChange}
-          availableSprints={availableSprintOptions}
-          normalizeWeekKey={normalizeWeekKey}
           page={page}
           rowsPerPage={rowsPerPage}
           onPageChange={(_, newPage) => setPage(newPage)}
@@ -905,6 +917,8 @@ export default function ProjectTaskBoard() {
             setPage(0);
           }}
           totalCount={workTasks.length}
+          primaryDelayTaskId={primaryDelayTaskId}
+          delayTaskMap={delayTaskMap}
         />
       )}
 
@@ -918,59 +932,6 @@ export default function ProjectTaskBoard() {
         onCancel={handleStatusRemarkCancel}
         onConfirm={handleStatusRemarkConfirm}
       />
-
-      {/* Add Sprint Dialog */}
-      <Dialog open={addSprintOpen} onClose={() => setAddSprintOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle sx={{ fontWeight: 800 }}>Add Sprint</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-            Create a new sprint section. Then assign tasks using the Sprint column, import a CSV,
-            or add a single task.
-          </Typography>
-          <TextField
-            autoFocus
-            fullWidth
-            label="Sprint name"
-            placeholder="e.g. W4 or Sprint 4"
-            value={newSprintName}
-            onChange={(e) => setNewSprintName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddSprint();
-            }}
-          />
-          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 2 }}>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<UploadIcon />}
-              onClick={() => {
-                setAddSprintOpen(false);
-                navigate(`/projects/upload?projectId=${projectId}`);
-              }}
-            >
-              Import CSV
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={() => {
-                setAddSprintOpen(false);
-                setNewTask((prev) => ({ ...prev, week: newSprintName.trim() }));
-                setAddTaskOpen(true);
-              }}
-            >
-              Add single task
-            </Button>
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setAddSprintOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleAddSprint} startIcon={<AddIcon />}>
-            Add Sprint
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* Add Task Dialog */}
       <Dialog
@@ -1022,20 +983,6 @@ export default function ProjectTaskBoard() {
               </TextField>
             </Stack>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <TextField
-                select
-                label="Sprint"
-                fullWidth
-                value={newTask.week}
-                onChange={(e) => setNewTask({ ...newTask, week: e.target.value })}
-              >
-                <MenuItem value="">Unscheduled</MenuItem>
-                {availableSprintOptions.map((opt) => (
-                  <MenuItem key={opt} value={opt}>
-                    {opt}
-                  </MenuItem>
-                ))}
-              </TextField>
               <TextField
                 select
                 label="Developer"

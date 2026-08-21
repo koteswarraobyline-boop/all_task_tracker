@@ -3,11 +3,11 @@ export const STATUS_PROGRESS = {
   Upcoming: 0,
   Assigned: 15,
   'In Development': 40,
-  'Code Review': 60,
   Testing: 80,
   Completed: 100,
   Blocked: 25,
   'On Hold': 20,
+  'Code Review': 80,
 };
 
 export function progressFromStatus(status) {

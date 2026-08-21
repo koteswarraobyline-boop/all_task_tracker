@@ -1,6 +1,7 @@
 export const PERMISSIONS = {
   superadmin: new Set([
     'project.create',
+    'project.edit',
     'project.delete',
     'project.share',
     'task.edit',

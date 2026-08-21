@@ -25,7 +25,6 @@ export const STATUS_BAR_COLORS = {
   Upcoming: '#EAB308',
   Assigned: '#EAB308',
   'In Development': '#2563EB',
-  'Code Review': '#F97316',
   Testing: '#9333EA',
   Completed: '#22C55E',
   Blocked: '#EF4444',
@@ -42,7 +41,6 @@ const TIMELINE_STATUS_COLORS = {
 export const GROUP_BY_OPTIONS = [
   { key: 'epic', label: 'Epic' },
   { key: 'module', label: 'Module' },
-  { key: 'sprint', label: 'Sprint' },
   { key: 'milestone', label: 'Milestone' },
   { key: 'assignee', label: 'Assignee' },
   { key: 'status', label: 'Status' },
@@ -208,26 +206,10 @@ export function parseDependencyIds(raw) {
     .filter(Boolean);
 }
 
-function normalizeSprintKey(raw) {
-  let weekKey = (raw || 'Unscheduled').trim();
-  if (!weekKey) weekKey = 'Unscheduled';
-  const lower = weekKey.toLowerCase();
-  if (lower.startsWith('week') || lower.startsWith('sprint')) {
-    const num = weekKey.match(/\d+/);
-    if (num) weekKey = `Sprint ${num[0]}`;
-  } else if (lower.startsWith('w') && /^\s*w\d+/i.test(weekKey)) {
-    const num = weekKey.match(/\d+/);
-    if (num) weekKey = `Sprint ${num[0]}`;
-  }
-  return weekKey;
-}
-
 function groupKeyForTask(task, groupBy, devById) {
   switch (groupBy) {
     case 'module':
       return (task.module || task.parentId || 'Ungrouped').toString().trim() || 'Ungrouped';
-    case 'sprint':
-      return normalizeSprintKey(task.week);
     case 'milestone':
     case 'epic':
       return (task.phase || 'General').trim() || 'General';
@@ -455,7 +437,7 @@ export function buildGanttData(tasks, developers = [], options = {}) {
       const key = groupKeyForTask(t, groupBy, devById);
       ensureGroup(key);
     });
-    if (!groupOrder.length) ensureGroup(groupBy === 'sprint' ? 'Unscheduled' : 'General');
+    if (!groupOrder.length) ensureGroup('General');
 
     workTasks.forEach((t) => {
       const key = groupKeyForTask(t, groupBy, devById);

@@ -26,7 +26,7 @@ import { getDeveloperDisplayName } from '../utils/developerDisplay';
 import { getTaskProgressPercent, progressBarColor } from '../utils/taskProgress';
 
 const ALL_STATUSES = [
-  'Upcoming', 'Assigned', 'In Development', 'Code Review',
+  'Upcoming', 'Assigned', 'In Development',
   'Testing', 'Completed', 'Blocked', 'On Hold',
 ];
 
@@ -89,7 +89,6 @@ function buildFormFromTask(task) {
     module: task.module || '',
     feature: task.feature || '',
     phase: task.phase || '',
-    week: task.week || '',
     startDate: toDateInput(task.startDate),
     dueDate: toDateInput(task.dueDate),
     estimatedHours:
@@ -219,7 +218,6 @@ export default function TaskDetailsDrawer({ open, onClose, task, developers, onT
         module: form.module.trim() || null,
         feature: form.feature.trim() || null,
         phase: form.phase.trim() || null,
-        week: form.week.trim() || null,
         startDate: form.startDate || null,
         dueDate: form.dueDate || null,
         estimatedHours: form.estimatedHours === '' ? null : parseFloat(form.estimatedHours),
@@ -260,7 +258,6 @@ export default function TaskDetailsDrawer({ open, onClose, task, developers, onT
       case 'Completed': return 'success';
       case 'In Development': return 'primary';
       case 'Testing': return 'secondary';
-      case 'Code Review': return 'info';
       case 'Blocked': return 'error';
       case 'On Hold': return 'warning';
       default: return 'default';

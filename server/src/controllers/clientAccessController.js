@@ -1,6 +1,10 @@
 const { randomUUID } = require('crypto');
 const bcrypt = require('bcryptjs');
-const { ClientAccessRecord, Project, Task, Developer } = require('../models');
+const { ClientAccessRecord, Project, Task } = require('../models');
+const { analyzeProjectDelay } = require('../services/projectDelayAnalysisService');
+const { toClientProject, toClientDelayAnalysis } = require('../dto/clientProjectDto');
+const { toClientTasks } = require('../dto/clientTaskDto');
+const { todayStart } = require('../utils/dateUtils');
 
 const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -97,6 +101,16 @@ async function resolveShareAccess(token, password) {
   return { ok: true, record };
 }
 
+async function loadProjectTasks(projectId) {
+  return Task.findAll({
+    where: { projectId },
+    order: [
+      ['module', 'ASC'],
+      ['taskId', 'ASC'],
+    ],
+  });
+}
+
 async function validateToken(req, res) {
   try {
     const { token } = req.params;
@@ -111,27 +125,16 @@ async function validateToken(req, res) {
     await record.update({ lastOpenedAt: new Date() });
 
     const project = record.project;
-    const dueDates = await Task.findAll({
-      where: { projectId: project.id },
-      attributes: ['dueDate'],
-      raw: true,
-    }).then(rows => rows.map(r => r.dueDate).filter(Boolean).sort());
-
-    const originalDeliveryDate = project.originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
-    const revisedDeliveryDate = project.revisedDeliveryDate || null;
-    const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
+    const tasks = await loadProjectTasks(project.id);
+    const now = todayStart();
+    const analysis = analyzeProjectDelay(project, tasks, now);
 
     return res.json({
-      project: {
-        id: project.id,
-        name: project.name,
-        clientName: project.clientName,
-        originalDeliveryDate,
-        revisedDeliveryDate,
-        targetDeliveryDate: project.targetDeliveryDate || null,
-        deliveryNotes: project.deliveryNotes || null,
-        effectiveDueDate,
-      },
+      project: toClientProject(project, analysis, {
+        clientName: record.clientName,
+        company: record.company,
+      }),
+      delayAnalysis: toClientDelayAnalysis(analysis),
       clientMeta: {
         clientName: record.clientName,
         company: record.company,
@@ -162,68 +165,44 @@ async function getClientTasks(req, res) {
 
     const projectId = result.record.projectId;
     const project = result.record.project;
-
-    const tasks = await Task.findAll({
-      where: { projectId },
-      include: [
-        {
-          model: Developer,
-          as: 'developer',
-          // Only expose id and color — never name or email to clients
-          attributes: ['id', 'color'],
-          required: false,
-        },
-      ],
-      order: [
-        ['module', 'ASC'],
-        ['taskId', 'ASC'],
-      ],
-    });
-
-    // Build a stripped developer map — id + color only, NO name or email
-    const developerMap = new Map();
-    tasks.forEach((t) => {
-      const d = t.developer;
-      if (d && !developerMap.has(d.id)) {
-        developerMap.set(d.id, {
-          id: d.id,
-          color: d.color,
-        });
-      }
-    });
-
-    // Strip developer name/email from each task's nested developer object
-    const sanitizedTasks = tasks.map((t) => {
-      const plain = t.toJSON ? t.toJSON() : { ...t };
-      if (plain.developer) {
-        plain.developer = { id: plain.developer.id, color: plain.developer.color };
-      }
-      return plain;
-    });
-
-    const dueDates = tasks.map((t) => t.dueDate).filter(Boolean).sort();
-    const originalDeliveryDate = project.originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
-    const revisedDeliveryDate = project.revisedDeliveryDate || null;
-    const effectiveDueDate = revisedDeliveryDate || originalDeliveryDate || (dueDates.length ? dueDates[dueDates.length - 1] : null);
+    const tasks = await loadProjectTasks(projectId);
+    const now = todayStart();
+    const analysis = analyzeProjectDelay(project, tasks, now);
+    const clientTasks = toClientTasks(tasks, now);
 
     return res.json({
-      project: {
-        id: project.id,
-        name: project.name,
-        clientName: project.clientName,
-        originalDeliveryDate,
-        revisedDeliveryDate,
-        targetDeliveryDate: project.targetDeliveryDate || null,
-        deliveryNotes: project.deliveryNotes || null,
-        effectiveDueDate,
-      },
-      tasks: sanitizedTasks,
-      developers: Array.from(developerMap.values()),
-      totalCount: tasks.length,
+      project: toClientProject(project, analysis, {
+        clientName: result.record.clientName,
+        company: result.record.company,
+      }),
+      delayAnalysis: toClientDelayAnalysis(analysis),
+      tasks: clientTasks,
+      totalCount: clientTasks.length,
     });
   } catch (error) {
     console.error('getClientTasks error:', error);
     return res.status(500).json({ error: 'Failed to load shared project tasks' });
+  }
+}
+
+async function getClientDelayAnalysis(req, res) {
+  try {
+    const { token } = req.params;
+    const password = req.headers['x-share-password'] || req.query.password;
+    const result = await resolveShareAccess(token, password);
+
+    if (!result.ok) {
+      return res.status(result.status).json(result.body);
+    }
+
+    const project = result.record.project;
+    const tasks = await loadProjectTasks(project.id);
+    const analysis = analyzeProjectDelay(project, tasks, todayStart());
+
+    return res.json(toClientDelayAnalysis(analysis));
+  } catch (error) {
+    console.error('getClientDelayAnalysis error:', error);
+    return res.status(500).json({ error: 'Failed to load delay analysis' });
   }
 }
 
@@ -312,7 +291,6 @@ async function updateAccessRecord(req, res) {
       }
       updates.status = status;
     }
-    // Client links do not expire — always clear any previous expiry
     updates.expiresAt = null;
     if (clientName !== undefined) updates.clientName = clientName;
     if (company !== undefined) updates.company = company || null;
@@ -376,6 +354,7 @@ async function deleteAccessRecord(req, res) {
 module.exports = {
   validateToken,
   getClientTasks,
+  getClientDelayAnalysis,
   createAccessRecord,
   listAccessRecords,
   updateAccessRecord,

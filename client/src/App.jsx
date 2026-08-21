@@ -12,6 +12,9 @@ import ProjectTaskBoard from './pages/ProjectTaskBoard';
 import ProjectTaskCalendar from './pages/ProjectTaskCalendar';
 import ProjectTaskTimeline from './pages/ProjectTaskTimeline';
 import Dashboard from './pages/Dashboard';
+import ProjectFiles from './pages/ProjectFiles';
+import ProjectSettings from './pages/ProjectSettings';
+import AdminDashboard from './pages/AdminDashboard';
 import Developers from './pages/Developers';
 import Settings from './pages/Settings';
 import LoginPage from './pages/LoginPage';
@@ -21,7 +24,7 @@ import ClientShell from './pages/ClientShell';
 function HomeRedirect() {
   const token = localStorage.getItem('authToken');
   if (token && !isTokenExpired(token)) {
-    return <Navigate to="/projects" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
   return <Navigate to="/login" replace />;
 }
@@ -47,17 +50,20 @@ function AppRoutes({ mode, toggleMode }) {
             <Layout mode={mode} toggleMode={toggleMode}>
               <Routes>
                 <Route path="/" element={<HomeRedirect />} />
+                <Route path="/dashboard" element={<AdminDashboard />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/projects/upload" element={<UploadProject />} />
                 <Route path="/projects/:id/tasks" element={<ProjectTaskBoard />} />
                 <Route path="/projects/:id/calendar" element={<ProjectTaskCalendar />} />
                 <Route path="/projects/:id/timeline" element={<ProjectTaskTimeline />} />
                 <Route path="/projects/:id/dashboard" element={<Dashboard />} />
+                <Route path="/projects/:id/files" element={<ProjectFiles />} />
+                <Route path="/projects/:id/settings" element={<ProjectSettings />} />
                 <Route path="/projects/:id/reports" element={<ReportsToDashboardRedirect />} />
                 <Route path="/developers" element={<Developers />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/users" element={<UserManagement />} />
-                <Route path="*" element={<Navigate to="/projects" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

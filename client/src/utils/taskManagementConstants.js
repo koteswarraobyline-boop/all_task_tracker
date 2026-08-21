@@ -8,7 +8,6 @@ export const API_STATUSES = [
   'Upcoming',
   'Assigned',
   'In Development',
-  'Code Review',
   'Testing',
   'Completed',
   'Blocked',
@@ -57,18 +56,10 @@ export const STATUS_CATALOG = [
     key: 'in_progress',
     label: 'In Progress',
     // Aggregate: actively moving through the pipeline (not a duplicate of In Development alone)
-    apiStatuses: ['In Development', 'Code Review', 'Testing'],
+    apiStatuses: ['In Development', 'Testing'],
     writeStatus: 'In Development',
     color: '#F97316',
     progress: 50,
-  },
-  {
-    key: 'in_review',
-    label: 'In Review',
-    apiStatuses: ['Code Review'],
-    writeStatus: 'Code Review',
-    color: '#6366F1',
-    progress: 70,
   },
   {
     key: 'testing',
@@ -112,7 +103,6 @@ export const EDITABLE_STATUSES = [
   STATUS_CATALOG.find((s) => s.key === 'not_started'),
   STATUS_CATALOG.find((s) => s.key === 'pending'),
   STATUS_CATALOG.find((s) => s.key === 'in_development'),
-  STATUS_CATALOG.find((s) => s.key === 'in_review'),
   STATUS_CATALOG.find((s) => s.key === 'testing'),
   STATUS_CATALOG.find((s) => s.key === 'blocked'),
   STATUS_CATALOG.find((s) => s.key === 'completed'),
@@ -160,22 +150,22 @@ const API_TO_DISPLAY = {
   Upcoming: 'Not Started',
   Assigned: 'Pending',
   'In Development': 'In Development',
-  'Code Review': 'In Review',
   Testing: 'Testing',
   Completed: 'Completed',
   Blocked: 'Blocked',
   'On Hold': 'Cancelled',
+  'Code Review': 'Testing',
 };
 
 const API_TO_COLOR = {
   Upcoming: '#94A3B8',
   Assigned: '#EAB308',
   'In Development': '#2563EB',
-  'Code Review': '#6366F1',
   Testing: '#9333EA',
   Completed: '#22C55E',
   Blocked: '#EF4444',
   'On Hold': '#6B7280',
+  'Code Review': '#9333EA',
 };
 
 /** Module-local progress defaults (examples from product spec) */
@@ -183,11 +173,11 @@ export const MODULE_STATUS_PROGRESS = {
   Upcoming: 0,
   Assigned: 10,
   'In Development': 60,
-  'Code Review': 70,
   Testing: 80,
   Completed: 100,
   Blocked: 25,
   'On Hold': 0,
+  'Code Review': 80,
 };
 
 export function getStatusDisplayLabel(apiStatus) {
@@ -280,10 +270,22 @@ export function endOfWeek(d = new Date()) {
 }
 
 export function isOverdue(task, today = startOfDay()) {
-  if (!task || task.status === 'Completed' || task.status === 'On Hold') return false;
+  if (!task || task.recordType === 'module') return false;
+  if (task.status === 'Completed') return false;
   const due = toDateOnly(task.dueDate);
   if (!due) return false;
   return new Date(`${due}T00:00:00`) < today;
+}
+
+/** Calendar days past due date (0 if not overdue). Includes On Hold / Blocked when past due. */
+export function getOverdueDays(task, today = startOfDay()) {
+  if (!task || task.recordType === 'module') return 0;
+  if (task.status === 'Completed') return 0;
+  const due = toDateOnly(task.dueDate);
+  if (!due) return 0;
+  const dueDate = new Date(`${due}T00:00:00`);
+  if (dueDate >= today) return 0;
+  return Math.max(1, Math.round((today.getTime() - dueDate.getTime()) / 86400000));
 }
 
 export function isDueToday(task, today = startOfDay()) {
@@ -416,10 +418,10 @@ export function computeTaskStats(tasks) {
   const total = list.length;
   const completed = list.filter((t) => t.status === 'Completed').length;
   const ongoing = list.filter((t) =>
-    ['In Development', 'Code Review', 'Testing', 'Assigned'].includes(t.status)
+    ['In Development', 'Testing', 'Assigned'].includes(t.status) || t.status === 'Code Review'
   ).length;
   const inProgress = list.filter((t) =>
-    ['In Development', 'Code Review', 'Testing'].includes(t.status)
+    ['In Development', 'Testing'].includes(t.status) || t.status === 'Code Review'
   ).length;
   const development = list.filter((t) => t.status === 'In Development').length;
   const testing = list.filter((t) => t.status === 'Testing').length;

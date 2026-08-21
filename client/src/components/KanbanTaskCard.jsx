@@ -84,7 +84,7 @@ function formatDue(value) {
 function progressFill(status, columnAccent) {
   if (status === 'Completed') return '#16A34A';
   if (status === 'Blocked') return '#DC2626';
-  if (status === 'Code Review' || status === 'Testing') return '#D97706';
+  if (status === 'Testing' || status === 'Code Review') return '#D97706';
   if (status === 'In Development') return '#4F46E5';
   if (status === 'Assigned') return '#2563EB';
   return columnAccent || '#64748B';

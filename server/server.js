@@ -43,32 +43,57 @@ if (isProd) {
   }
 }
 
-const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_APP_URL || '')
+const defaultDevOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+  'http://localhost:5004',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+];
+
+const envOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_APP_URL || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
 
+const allowedOrigins = [...new Set([...envOrigins, ...defaultDevOrigins])];
+
 app.use(
   cors({
-    origin: allowedOrigins.length
-      ? (origin, callback) => {
-          if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-          } else {
-            callback(null, false);
-          }
-        }
-      : true,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     credentials: true,
   })
 );
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '2mb' }));
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  let database = 'disconnected';
+  try {
+    await sequelize.authenticate();
+    database = 'connected';
+  } catch (err) {
+    return res.status(503).json({
+      ok: false,
+      service: 'task-tracker-api',
+      database,
+      env: isProd ? 'production' : process.env.NODE_ENV || 'development',
+      uptime: Math.floor(process.uptime()),
+      error: 'Database unavailable',
+    });
+  }
+
   res.json({
     ok: true,
     service: 'task-tracker-api',
+    database,
     env: isProd ? 'production' : process.env.NODE_ENV || 'development',
     uptime: Math.floor(process.uptime()),
   });

@@ -118,7 +118,10 @@ export default function FilterDropdown({
         sx={{
           minWidth,
           height: 36,
-          px: 1.5,
+          minHeight: 36,
+          maxHeight: 36,
+          px: 1.25,
+          py: 0,
           borderRadius: '10px',
           textTransform: 'none',
           fontWeight: hasValue ? 700 : 600,
@@ -130,15 +133,16 @@ export default function FilterDropdown({
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
-          justifyContent: 'space-between',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
           transition: 'all 0.15s ease',
           '&:hover': {
             bgcolor: hasValue ? 'rgba(79,70,229,0.1)' : 'action.hover',
             borderColor: hasValue ? 'primary.main' : 'text.disabled',
             boxShadow: '0 2px 8px rgba(15,23,42,0.06)',
           },
-          '& .MuiButton-endIcon': { ml: 0.5 },
-          '& .MuiButton-startIcon': { mr: 0.75 },
+          '& .MuiButton-endIcon': { ml: 'auto', flexShrink: 0 },
+          '& .MuiButton-startIcon': { mr: 0.5, flexShrink: 0 },
         }}
       >
         <Box
@@ -146,7 +150,9 @@ export default function FilterDropdown({
           sx={{
             overflow: 'hidden',
             textOverflow: 'ellipsis',
-            maxWidth: 160,
+            flex: 1,
+            minWidth: 0,
+            textAlign: 'left',
           }}
         >
           {triggerLabel}

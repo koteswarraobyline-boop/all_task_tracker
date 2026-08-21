@@ -86,7 +86,6 @@ const DEFAULT_FILTERS = {
   projectFilter: '',
   dateFrom: '',
   dateTo: '',
-  sprint: '',
 };
 
 const SUMMARY_CARDS = [
@@ -444,21 +443,8 @@ export default function ProjectTaskTimeline() {
     loadData();
   }, [loadData]);
 
-  const sprintOptions = useMemo(() => {
-    const set = new Set();
-    (tasks || []).forEach((t) => {
-      if (t.recordType === 'module') return;
-      const w = (t.week || '').trim();
-      if (w) set.add(w);
-    });
-    return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [tasks]);
-
   const filteredTasks = useMemo(() => {
     let list = filterAndSortTasks(tasks, filters, project?.name || '');
-    if (filters.sprint) {
-      list = list.filter((t) => String(t.week || '').trim() === filters.sprint);
-    }
     // Keep module parents so epic grouping still works when present
     const modules = (tasks || []).filter((t) => t.recordType === 'module');
     const ids = new Set(list.map((t) => t.id));
@@ -558,7 +544,6 @@ export default function ProjectTaskTimeline() {
     if (filters.developerId) n += 1;
     if (filters.search) n += 1;
     if (filters.dateFrom || filters.dateTo) n += 1;
-    if (filters.sprint) n += 1;
     return n;
   }, [filters]);
 
@@ -596,7 +581,7 @@ export default function ProjectTaskTimeline() {
             Project Timeline
           </Typography>
           <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', fontWeight: 550 }}>
-            {project?.name || 'Project'} · Roadmap of phases, sprints and delivery
+            {project?.name || 'Project'} · Roadmap of phases and delivery
           </Typography>
         </Box>
 
@@ -797,21 +782,6 @@ export default function ProjectTaskTimeline() {
                 {developers.map((d) => (
                   <MenuItem key={d.id} value={String(d.id)}>
                     {getDeveloperDisplayName(d)}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                size="small"
-                label="Sprint / Milestone"
-                value={filters.sprint}
-                onChange={(e) => setFilter({ sprint: e.target.value })}
-                sx={{ ...fieldSx, minWidth: { xs: '100%', sm: 160 } }}
-              >
-                <MenuItem value="">All sprints</MenuItem>
-                {sprintOptions.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
                   </MenuItem>
                 ))}
               </TextField>
