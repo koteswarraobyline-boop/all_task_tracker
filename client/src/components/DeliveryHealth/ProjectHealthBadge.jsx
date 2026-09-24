@@ -16,7 +16,7 @@ export default function ProjectHealthBadge({ status, size = 'small', sx = {} }) 
         label={label.toUpperCase()}
         sx={{
           height: size === 'small' ? 24 : 28,
-          fontWeight: 800,
+          fontWeight: 650,
           fontSize: size === 'small' ? '0.65rem' : '0.7rem',
           letterSpacing: '0.04em',
           bgcolor: colors.bg,

@@ -1,9 +1,14 @@
 Record Type,ID,Parent ID,Name,Description,Status,Priority,Assignee,Start Date,Due Date,Estimated Hours,Actual Hours,Progress %,Tags,Dependencies,Phase
-Module,M001,,Authentication,Login and security foundation,Active,High,John Doe,2026-07-01,2026-08-01,,,,,auth;security,,Phase 1
-Task,T001,M001,Login API,Build login endpoint,In Progress,High,Alice Smith,2026-07-02,2026-07-10,12,6,50,api;auth,,Phase 1
-Task,T002,M001,JWT Authentication,Implement JWT access and refresh tokens,Todo,Medium,Bob Builder,2026-07-05,2026-07-15,8,,0,api;security,T001,Phase 1
-Module,M002,,Dashboard,User dashboard and analytics,Active,High,Mike Ross,2026-07-03,2026-08-10,,,,,ui,,Phase 1
-Task,T003,M002,Dashboard UI,Create main dashboard page,Todo,High,Emma Stone,2026-07-04,2026-07-20,16,,0,ui;frontend,,Phase 1
-Module,M003,M002,Reports,Reporting submodule under Dashboard,Planned,Medium,Sarah Connor,2026-07-10,2026-08-15,,,,,reports,,Phase 1
-Task,T004,M003,Sales Report,Build sales report page,Todo,Medium,David Lee,2026-07-12,2026-07-25,10,,0,reports;charts,,Phase 1
-Task,T005,,Server Backup,Backup automation (standalone - no module),Todo,Low,Admin,2026-07-01,2026-07-31,4,,0,ops;infra,,Infrastructure
+Module,M001,,Authentication,User sign-in and session security,In Development,High,,2026-08-01,2026-09-15,,,,auth;security,Phase 1
+Task,T001,M001,Login API,Email/password login endpoint with rate limiting,In Development,High,Alice Smith,2026-08-02,2026-08-12,16,8,50,api;backend,,Phase 1
+Task,T002,M001,JWT Refresh Tokens,Access + refresh token rotation,Upcoming,High,Bob Builder,2026-08-10,2026-08-20,12,,0,api;security,T001,Phase 1
+Task,T003,M001,Google OAuth,Sign in with Google,Testing,Medium,Alice Smith,2026-08-05,2026-08-18,10,9,90,oauth;frontend,T001,Phase 1
+Module,M002,,Dashboard,Main analytics and overview screens,In Development,High,,2026-08-01,2026-09-30,,,,ui;analytics,Phase 1
+Task,T004,M002,Stats Cards,Project KPI summary cards,Completed,Medium,Jane Doe,2026-08-03,2026-08-14,8,8,100,ui;frontend,,Phase 1
+Task,T005,M002,Burn-up Chart,Progress over time line chart,In Development,High,Mike Ross,2026-08-08,2026-08-25,14,6,40,charts;frontend,T004,Phase 1
+Module,M003,M002,Reports,Nested reporting under Dashboard,Upcoming,Medium,,2026-08-15,2026-10-01,,,,reports,Phase 1
+Task,T006,M003,Export CSV,Download task list as CSV,Upcoming,Low,Sarah Lee,2026-08-18,2026-08-28,6,,0,export;backend,,Phase 1
+Task,T007,M003,Delay Analysis View,Schedule risk breakdown panel,Blocked,High,David Kim,2026-08-12,2026-08-22,12,3,25,reports;ui,T005,Phase 1
+Module,M004,,Notifications,Email and in-app alerts,Upcoming,Medium,,2026-09-01,2026-10-15,,,,email,Phase 2
+Task,T008,M004,Welcome Email,Send email when client portal is shared,On Hold,Low,Emma Stone,2026-09-05,2026-09-12,4,,0,email,,Phase 2
+Task,T009,,Database Backup,Nightly MySQL backup job (standalone task),Upcoming,Low,Admin Team,2026-08-01,2026-08-31,4,,0,ops;infra,,Infrastructure

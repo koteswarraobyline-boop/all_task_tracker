@@ -39,6 +39,12 @@ const Project = sequelize.define('Project', {
     allowNull: true,
     field: 'delivery_notes',
   },
+  /** Optional per-project edit-unlock password (plain compared server-side; UX layer only). */
+  editUnlockPassword: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    field: 'edit_unlock_password',
+  },
 }, {
   tableName: 'projects',
 });

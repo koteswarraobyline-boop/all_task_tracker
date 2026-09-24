@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const projectController = require('../controllers/projectController');
+const exportController = require('../controllers/exportController');
 const { authMiddleware } = require('../middleware/auth');
 
 // Ensure uploads directory exists
@@ -23,8 +24,11 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const CSV_MAX_BYTES = Number(process.env.CSV_UPLOAD_MAX_MB || 10) * 1024 * 1024;
+
+const upload = multer({
   storage,
+  limits: { fileSize: CSV_MAX_BYTES },
   fileFilter: (req, file, cb) => {
     // Validate file type (should be csv)
     const ext = path.extname(file.originalname).toLowerCase();
@@ -36,10 +40,14 @@ const upload = multer({
 });
 
 router.get('/', authMiddleware, projectController.getAllProjects);
+router.get('/:id/export/tasks', authMiddleware, exportController.exportProjectTasks);
 router.get('/:id/delay-analysis', authMiddleware, projectController.getProjectDelayAnalysis);
 router.put('/:id', authMiddleware, projectController.updateProject);
 router.delete('/:id', authMiddleware, projectController.deleteProject);
 router.put('/:id/delivery-date', authMiddleware, projectController.updateProjectDeliveryDate);
 router.post('/upload', authMiddleware, upload.single('file'), projectController.uploadProject);
+
+const wbsRoutes = require('./wbsRoutes');
+router.use('/:id', wbsRoutes);
 
 module.exports = router;

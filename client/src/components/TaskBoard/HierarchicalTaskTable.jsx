@@ -7,17 +7,18 @@ import {
   MenuItem,
   Paper,
   Select,
+  Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   Tooltip,
   Typography,
 } from '@mui/material';
+import PaginationBar from '../PaginationBar';
 import {
   KeyboardArrowDown as ExpandIcon,
   KeyboardArrowRight as CollapseIcon,
@@ -25,9 +26,11 @@ import {
 } from '@mui/icons-material';
 import { splitTitleAndDescription } from '../TaskDetailsDrawer';
 import { getDeveloperDisplayName } from '../../utils/developerDisplay';
-import { getOverdueDays } from '../../utils/taskManagementConstants';
+import { getOverdueDays, shouldShowOverdueAlert } from '../../utils/taskManagementConstants';
+import { formatShortDate } from '../../utils/deliveryHealth';
 import { ProgressCell, PriorityBadge, StatusBadge, StatusDot } from './Badges';
 import TaskActionsMenu from './TaskActionsMenu';
+import ModuleActionsMenu from './ModuleActionsMenu';
 import { ALL_STATUSES, phaseAccent, normalizeLegacyStatus } from './constants';
 
 function InlineStatusSelect({ value, onChange, isDark, canEdit }) {
@@ -82,10 +85,10 @@ function InlineDeveloperSelect({ value, onChange, developers, canEdit }) {
 
   if (!canEdit) {
     return (
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0, maxWidth: 140 }}>
-        {selected && avatar}
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0, maxWidth: 160 }}>
+        {selected ? avatar : null}
         <Typography variant="body2" sx={{ fontWeight: 650, fontSize: '0.8125rem' }} noWrap>
-          {displayName || '—'}
+          {displayName || 'Unassigned'}
         </Typography>
       </Stack>
     );
@@ -99,7 +102,7 @@ function InlineDeveloperSelect({ value, onChange, developers, canEdit }) {
       size="small"
       variant="standard"
       disableUnderline
-      sx={{ fontSize: '0.8125rem', minWidth: 120, maxWidth: 150 }}
+      sx={{ fontSize: '0.8125rem', minWidth: 120, maxWidth: 160 }}
       renderValue={() => (
         <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
           {avatar}
@@ -117,15 +120,7 @@ function InlineDeveloperSelect({ value, onChange, developers, canEdit }) {
         return (
           <MenuItem key={dev.id} value={dev.id}>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Avatar
-                sx={{
-                  width: 18,
-                  height: 18,
-                  fontSize: '0.55rem',
-                  bgcolor: dev.color,
-                  fontWeight: 700,
-                }}
-              >
+              <Avatar sx={{ width: 18, height: 18, fontSize: '0.55rem', bgcolor: dev.color, fontWeight: 700 }}>
                 {label
                   .split(' ')
                   .map((n) => n[0])
@@ -159,6 +154,23 @@ const headCellSx = {
   zIndex: 3,
 };
 
+function TableSkeleton({ isClient }) {
+  const cols = isClient ? 8 : 9;
+  return (
+    <>
+      {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+        <TableRow key={i}>
+          {Array.from({ length: cols }).map((_, j) => (
+            <TableCell key={j}>
+              <Skeleton variant="text" width={j === 0 ? '80%' : '60%'} height={24} />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
 export default function HierarchicalTaskTable({
   phaseTree,
   developers,
@@ -166,6 +178,7 @@ export default function HierarchicalTaskTable({
   canStatus,
   canAssign,
   canEdit,
+  canDelete,
   isClient,
   priorityBadges,
   expandedPhases,
@@ -174,6 +187,8 @@ export default function HierarchicalTaskTable({
   onToggleModule,
   onRowClick,
   onDeleteTask,
+  onDeleteModule,
+  onEditModule,
   onStatusChange,
   onDeveloperChange,
   page,
@@ -181,8 +196,9 @@ export default function HierarchicalTaskTable({
   onPageChange,
   onRowsPerPageChange,
   totalCount,
+  loading = false,
   primaryDelayTaskId = null,
-  delayTaskMap = {},
+  delayTaskMap: _delayTaskMap = {},
 }) {
   return (
     <Paper
@@ -200,10 +216,7 @@ export default function HierarchicalTaskTable({
           maxHeight: 'calc(100vh - 320px)',
           overflowX: 'auto',
           '&::-webkit-scrollbar': { height: 8, width: 8 },
-          '&::-webkit-scrollbar-thumb': {
-            bgcolor: '#CBD5E1',
-            borderRadius: 8,
-          },
+          '&::-webkit-scrollbar-thumb': { bgcolor: '#CBD5E1', borderRadius: 8 },
         }}
       >
         <Table stickyHeader size="small" sx={{ minWidth: 1100 }}>
@@ -214,7 +227,7 @@ export default function HierarchicalTaskTable({
               <TableCell sx={headCellSx}>Status</TableCell>
               {!isClient && <TableCell sx={headCellSx}>Developer</TableCell>}
               <TableCell sx={headCellSx}>Start Date</TableCell>
-              <TableCell sx={headCellSx}>End Date</TableCell>
+              <TableCell sx={headCellSx}>Due Date</TableCell>
               <TableCell sx={headCellSx}>Priority</TableCell>
               <TableCell sx={headCellSx}>Progress</TableCell>
               {!isClient && (
@@ -225,9 +238,11 @@ export default function HierarchicalTaskTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {phaseTree.length === 0 ? (
+            {loading ? (
+              <TableSkeleton isClient={isClient} />
+            ) : phaseTree.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isClient ? 7 : 9} sx={{ py: 6, textAlign: 'center' }}>
+                <TableCell colSpan={isClient ? 8 : 9} sx={{ py: 6, textAlign: 'center' }}>
                   <Typography color="text.secondary" fontWeight={600}>
                     No phases or modules match your filters
                   </Typography>
@@ -239,102 +254,47 @@ export default function HierarchicalTaskTable({
                 const accent = phaseAccent(phaseIdx);
                 return (
                   <React.Fragment key={phase.id}>
-                    {/* PHASE ROW */}
                     <TableRow
                       onClick={() => onTogglePhase(phase.id)}
                       sx={{
                         cursor: 'pointer',
                         bgcolor: isDark ? 'rgba(30,41,59,0.5)' : 'rgba(248,250,252,0.95)',
-                        '& td': {
-                          borderBottom: '1px solid',
-                          borderColor: 'divider',
-                          py: 1.5,
-                        },
-                        '&:hover': {
-                          bgcolor: isDark ? 'rgba(51,65,85,0.5)' : 'rgba(241,245,249,1)',
-                        },
-                        transition: 'background 0.15s ease',
+                        '& td': { borderBottom: '1px solid', borderColor: 'divider', py: 1.5 },
+                        '&:hover': { bgcolor: isDark ? 'rgba(51,65,85,0.5)' : 'rgba(241,245,249,1)' },
                       }}
                     >
-                      <TableCell colSpan={isClient ? 6 : 6} sx={{ pl: 1.5 }}>
+                      <TableCell colSpan={isClient ? 5 : 6} sx={{ pl: 1.5 }}>
                         <Stack direction="row" spacing={1.25} alignItems="center">
-                          <Box
-                            sx={{
-                              width: 4,
-                              alignSelf: 'stretch',
-                              minHeight: 36,
-                              borderRadius: 2,
-                              bgcolor: accent,
-                              flexShrink: 0,
-                            }}
-                          />
-                          <IconButton size="small" sx={{ p: 0.35 }}>
-                            {phaseOpen ? (
-                              <ExpandIcon fontSize="small" />
-                            ) : (
-                              <CollapseIcon fontSize="small" />
-                            )}
+                          <Box sx={{ width: 4, alignSelf: 'stretch', minHeight: 36, borderRadius: 2, bgcolor: accent, flexShrink: 0 }} />
+                          <IconButton size="small" sx={{ p: 0.35 }} aria-label={phaseOpen ? 'Collapse phase' : 'Expand phase'}>
+                            {phaseOpen ? <ExpandIcon fontSize="small" /> : <CollapseIcon fontSize="small" />}
                           </IconButton>
                           <Box sx={{ minWidth: 0, flex: 1 }}>
                             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                              <Typography
-                                sx={{
-                                  fontWeight: 800,
-                                  fontSize: '0.9rem',
-                                  letterSpacing: '-0.01em',
-                                }}
-                                noWrap
-                              >
+                              <Typography sx={{ fontWeight: 650, fontSize: '0.9rem' }} noWrap>
                                 {phase.name}
                               </Typography>
                               <Chip
                                 label={`${phase.taskCount} tasks`}
                                 size="small"
-                                sx={{
-                                  height: 22,
-                                  fontWeight: 700,
-                                  fontSize: '0.68rem',
-                                  bgcolor: isDark ? 'rgba(255,255,255,0.06)' : '#EEF2FF',
-                                  color: accent,
-                                }}
+                                sx={{ height: 22, fontWeight: 700, fontSize: '0.68rem', bgcolor: isDark ? 'rgba(255,255,255,0.06)' : '#EEF2FF', color: accent }}
                               />
-                              {!isClient && phase.developerCount > 0 && (
-                                <Chip
-                                  label={`${phase.developerCount} devs`}
-                                  size="small"
-                                  sx={{
-                                    height: 22,
-                                    fontWeight: 600,
-                                    fontSize: '0.68rem',
-                                    bgcolor: 'transparent',
-                                    border: '1px solid',
-                                    borderColor: 'divider',
-                                  }}
-                                />
-                              )}
                             </Stack>
                           </Box>
                         </Stack>
                       </TableCell>
-                      <TableCell colSpan={2}>
-                        <ProgressCell
-                          pct={phase.completionPct}
-                          completed={phase.completedTasks}
-                          total={phase.taskCount}
-                          showFraction
-                          width={100}
-                        />
+                      <TableCell />
+                      <TableCell sx={{ verticalAlign: 'middle' }}>
+                        <ProgressCell pct={phase.completionPct} width={88} />
                       </TableCell>
                       {!isClient && <TableCell />}
                     </TableRow>
 
-                    {/* MODULES */}
                     {phaseOpen &&
                       phase.modules.map((mod) => {
                         const modOpen = expandedModules[mod.id] !== false;
                         const moduleHasPrimaryDelay =
-                          primaryDelayTaskId != null &&
-                          mod.tasks.some((t) => String(t.id) === String(primaryDelayTaskId));
+                          primaryDelayTaskId != null && mod.tasks.some((t) => String(t.id) === String(primaryDelayTaskId));
                         return (
                           <React.Fragment key={mod.id}>
                             <TableRow
@@ -342,257 +302,130 @@ export default function HierarchicalTaskTable({
                               sx={{
                                 cursor: 'pointer',
                                 bgcolor: moduleHasPrimaryDelay
-                                  ? isDark
-                                    ? 'rgba(239,68,68,0.08)'
-                                    : 'rgba(254,242,242,0.7)'
-                                  : isDark
-                                    ? 'rgba(15,23,42,0.35)'
-                                    : 'rgba(255,255,255,0.7)',
-                                borderLeft: moduleHasPrimaryDelay ? '3px solid #FCA5A5' : undefined,
-                                '& td': {
-                                  borderBottom: '1px solid',
-                                  borderColor: 'divider',
-                                  py: 1.25,
-                                },
-                                '&:hover': {
-                                  bgcolor: isDark
-                                    ? 'rgba(51,65,85,0.35)'
-                                    : 'rgba(248,250,252,1)',
-                                },
+                                  ? isDark ? 'rgba(239,68,68,0.08)' : 'rgba(254,242,242,0.7)'
+                                  : isDark ? 'rgba(15,23,42,0.35)' : 'rgba(255,255,255,0.7)',
+                                '& td': { borderBottom: '1px solid', borderColor: 'divider', py: 1.25 },
+                                '&:hover': { bgcolor: isDark ? 'rgba(51,65,85,0.35)' : 'rgba(248,250,252,1)', '& .row-actions': { opacity: 1 } },
                               }}
                             >
-                              <TableCell colSpan={isClient ? 6 : 6} sx={{ pl: 5 }}>
+                              <TableCell colSpan={isClient ? 5 : 6} sx={{ pl: 5 }}>
                                 <Stack direction="row" spacing={1} alignItems="center">
-                                  <IconButton size="small" sx={{ p: 0.25 }}>
-                                    {modOpen ? (
-                                      <ExpandIcon sx={{ fontSize: 18 }} />
-                                    ) : (
-                                      <CollapseIcon sx={{ fontSize: 18 }} />
-                                    )}
+                                  <IconButton size="small" sx={{ p: 0.25 }} aria-label={modOpen ? 'Collapse module' : 'Expand module'}>
+                                    {modOpen ? <ExpandIcon sx={{ fontSize: 18 }} /> : <CollapseIcon sx={{ fontSize: 18 }} />}
                                   </IconButton>
                                   <Box sx={{ minWidth: 0 }}>
-                                    <Stack
-                                      direction="row"
-                                      spacing={1}
-                                      alignItems="center"
-                                      flexWrap="wrap"
-                                    >
-                                      <Typography
-                                        sx={{
-                                          fontWeight: 750,
-                                          fontSize: '0.85rem',
-                                          color: 'primary.main',
-                                        }}
-                                        noWrap
-                                      >
-                                        Module {mod.moduleId}
-                                        {mod.name ? ` — ${mod.name}` : ''}
-                                      </Typography>
-                                      <Chip
-                                        label={`${mod.taskCount} Tasks`}
-                                        size="small"
-                                        sx={{
-                                          height: 20,
-                                          fontSize: '0.65rem',
-                                          fontWeight: 700,
-                                          bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9',
-                                        }}
-                                      />
-                                    </Stack>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        color: 'text.secondary',
-                                        fontWeight: 600,
-                                        display: 'block',
-                                        mt: 0.25,
-                                      }}
-                                    >
-                                      Progress {mod.completionPct}% · {mod.completedTasks} /{' '}
-                                      {mod.taskCount} Completed
-                                      {!isClient && mod.ownerName ? ` · ${mod.ownerName}` : ''}
+                                    <Typography sx={{ fontWeight: 750, fontSize: '0.85rem', color: 'primary.main' }} noWrap>
+                                      Module {mod.moduleId}
+                                      {mod.name ? ` — ${mod.name}` : ''}
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, display: 'block', mt: 0.25 }}>
+                                      {mod.taskCount} tasks · {mod.completionPct}% complete
                                     </Typography>
                                   </Box>
                                 </Stack>
                               </TableCell>
-                              <TableCell colSpan={2}>
-                                <ProgressCell
-                                  pct={mod.completionPct}
-                                  completed={mod.completedTasks}
-                                  total={mod.taskCount}
-                                  width={88}
-                                />
+                              <TableCell />
+                              <TableCell sx={{ verticalAlign: 'middle' }}>
+                                <ProgressCell pct={mod.completionPct} width={88} />
                               </TableCell>
-                              {!isClient && <TableCell />}
+                              {!isClient && (
+                                <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                  <ModuleActionsMenu
+                                    moduleLabel={mod.name || mod.moduleId}
+                                    taskCount={mod.taskCount}
+                                    isStandalone={mod.moduleId === 'Unassigned'}
+                                    canEdit={canEdit}
+                                    canDelete={canDelete}
+                                    onEdit={
+                                      onEditModule ? () => onEditModule(mod) : undefined
+                                    }
+                                    onDelete={
+                                      onDeleteModule ? () => onDeleteModule(mod) : undefined
+                                    }
+                                  />
+                                </TableCell>
+                              )}
                             </TableRow>
 
-                            {/* TASKS */}
                             {modOpen &&
                               mod.tasks.map((task) => {
-                                const title = splitTitleAndDescription(
-                                  task.taskName,
-                                  task.description
-                                ).title;
-                                const delayInfo = delayTaskMap[task.id];
-                                const isPrimaryDelay =
-                                  primaryDelayTaskId != null &&
-                                  String(task.id) === String(primaryDelayTaskId);
-                                const isContributor = delayInfo?.isContributor && !isPrimaryDelay;
+                                const title = splitTitleAndDescription(task.taskName, task.description).title;
+                                const isPrimaryDelay = primaryDelayTaskId != null && String(task.id) === String(primaryDelayTaskId);
+                                const daysLate = shouldShowOverdueAlert(task) ? getOverdueDays(task) : 0;
                                 return (
                                   <TableRow
                                     key={task.id}
                                     onClick={() => onRowClick(task)}
                                     sx={{
                                       cursor: 'pointer',
-                                      bgcolor: isPrimaryDelay
-                                        ? 'rgba(239,68,68,0.08)'
-                                        : isContributor
-                                          ? 'rgba(249,115,22,0.06)'
-                                          : undefined,
+                                      bgcolor: isPrimaryDelay ? 'rgba(239,68,68,0.08)' : undefined,
                                       borderLeft: isPrimaryDelay ? '4px solid #EF4444' : undefined,
-                                      '& td': {
-                                        borderBottom: '1px solid',
-                                        borderColor: 'divider',
-                                        py: 1.15,
-                                        fontSize: '0.8125rem',
-                                      },
-                                      '&:hover': {
-                                        bgcolor: isPrimaryDelay
-                                          ? 'rgba(239,68,68,0.12)'
-                                          : 'action.hover',
-                                        '& .row-actions': { opacity: 1 },
-                                      },
-                                      transition: 'background 0.12s ease',
+                                      '& td': { borderBottom: '1px solid', borderColor: 'divider', py: 1.15, fontSize: '0.8125rem' },
+                                      '&:hover': { bgcolor: isPrimaryDelay ? 'rgba(239,68,68,0.12)' : 'action.hover', '& .row-actions': { opacity: 1 } },
                                     }}
                                   >
                                     <TableCell sx={{ pl: 8, maxWidth: 320 }}>
-                                      <Stack
-                                        direction="row"
-                                        spacing={1}
-                                        alignItems="center"
-                                        sx={{ minWidth: 0 }}
-                                      >
+                                      <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
                                         <StatusDot status={task.status} isDark={isDark} />
                                         {isPrimaryDelay && (
-                                          <Tooltip
-                                            title={
-                                              delayInfo?.explanation ||
-                                              'Likely primary delay driver for this project'
-                                            }
-                                          >
-                                            <Chip
-                                              icon={<WarningIcon sx={{ fontSize: '14px !important' }} />}
-                                              label="Primary delay"
-                                              size="small"
-                                              sx={{
-                                                height: 22,
-                                                fontWeight: 800,
-                                                fontSize: '0.62rem',
-                                                bgcolor: '#FEE2E2',
-                                                color: '#B91C1C',
-                                                flexShrink: 0,
-                                              }}
-                                            />
-                                          </Tooltip>
+                                          <Chip icon={<WarningIcon sx={{ fontSize: '14px !important' }} />} label="Primary delay" size="small" sx={{ height: 22, fontWeight: 800, fontSize: '0.62rem', bgcolor: '#FEE2E2', color: '#B91C1C' }} />
                                         )}
-                                        <Typography
-                                          sx={{
-                                            fontWeight: 600,
-                                            fontSize: '0.8125rem',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                          }}
-                                          title={title}
-                                        >
-                                          {title || '—'}
-                                        </Typography>
+                                        <Tooltip title={title}>
+                                          <Typography sx={{ fontWeight: 600, fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {title || '—'}
+                                          </Typography>
+                                        </Tooltip>
                                       </Stack>
                                     </TableCell>
                                     <TableCell>
-                                      <Typography
-                                        sx={{
-                                          fontWeight: 650,
-                                          color: 'text.secondary',
-                                          fontSize: '0.8rem',
-                                          fontFamily: 'ui-monospace, monospace',
-                                        }}
-                                      >
+                                      <Typography sx={{ fontWeight: 650, color: 'text.secondary', fontSize: '0.8rem', fontFamily: 'ui-monospace, monospace' }}>
                                         {task.taskId || '—'}
                                       </Typography>
                                     </TableCell>
                                     <TableCell onClick={(e) => e.stopPropagation()}>
-                                      <InlineStatusSelect
-                                        value={task.status}
-                                        onChange={(e) =>
-                                          onStatusChange(task.id, e.target.value)
-                                        }
-                                        isDark={isDark}
-                                        canEdit={canStatus}
-                                      />
+                                      <InlineStatusSelect value={task.status} onChange={(e) => onStatusChange(task.id, e.target.value)} isDark={isDark} canEdit={canStatus} />
                                     </TableCell>
                                     {!isClient && (
-                                    <TableCell onClick={(e) => e.stopPropagation()}>
-                                      <InlineDeveloperSelect
-                                        value={task.developerId}
-                                        onChange={(e) =>
-                                          onDeveloperChange(task.id, e.target.value)
-                                        }
-                                        developers={developers}
-                                        canEdit={canAssign}
-                                      />
-                                    </TableCell>
+                                      <TableCell onClick={(e) => e.stopPropagation()}>
+                                        <InlineDeveloperSelect value={task.developerId} onChange={(e) => onDeveloperChange(task.id, e.target.value)} developers={developers} canEdit={canAssign} />
+                                      </TableCell>
                                     )}
                                     <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                                      {task.startDate || '—'}
+                                      {formatShortDate(task.startDate) || '—'}
                                     </TableCell>
-                                    <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                                      {task.dueDate || '—'}
-                                      {(() => {
-                                        const daysLate = getOverdueDays(task);
-                                        if (!daysLate) return null;
-                                        return (
-                                          <Chip
-                                            size="small"
-                                            label={`${daysLate}d late`}
-                                            sx={{
-                                              ml: 0.75,
-                                              height: 20,
-                                              fontSize: '0.65rem',
-                                              fontWeight: 700,
-                                              bgcolor: '#FEE2E2',
-                                              color: '#B91C1C',
-                                            }}
-                                          />
-                                        );
-                                      })()}
+                                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                                      <Stack spacing={0.15}>
+                                        <Typography sx={{ color: 'text.secondary', fontSize: '0.8125rem' }}>
+                                          {formatShortDate(task.dueDate) || '—'}
+                                        </Typography>
+                                        {daysLate > 0 && (
+                                          <Typography sx={{ color: 'error.main', fontWeight: 700, fontSize: '0.72rem' }} aria-label={`${daysLate} days late`}>
+                                            {daysLate}d late
+                                          </Typography>
+                                        )}
+                                      </Stack>
                                     </TableCell>
                                     <TableCell>
-                                      <PriorityBadge
-                                        priority={task.priority}
-                                        badges={priorityBadges}
-                                      />
+                                      <PriorityBadge priority={task.priority} badges={priorityBadges} />
                                     </TableCell>
                                     <TableCell>
                                       <ProgressCell task={task} width={72} />
                                     </TableCell>
                                     {!isClient && (
-                                    <TableCell
-                                      align="center"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <TaskActionsMenu
-                                        task={task}
-                                        canEdit={canEdit}
-                                        canAssign={canAssign}
-                                        canStatus={canStatus}
-                                        onView={() => onRowClick(task)}
-                                        onEdit={() => onRowClick(task, true)}
-                                        onAssign={() => onRowClick(task, true)}
-                                        onMoveStatus={() => onRowClick(task, true)}
-                                        onDelete={onDeleteTask ? () => onDeleteTask(task) : undefined}
-                                      />
-                                    </TableCell>
+                                      <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                        <TaskActionsMenu
+                                          task={task}
+                                          canEdit={canEdit}
+                                          canDelete={canDelete}
+                                          canAssign={canAssign}
+                                          canStatus={canStatus}
+                                          onView={() => onRowClick(task)}
+                                          onEdit={() => onRowClick(task, true)}
+                                          onAssign={() => onRowClick(task, true)}
+                                          onMoveStatus={() => onRowClick(task, true)}
+                                          onDelete={onDeleteTask ? () => onDeleteTask(task) : undefined}
+                                        />
+                                      </TableCell>
                                     )}
                                   </TableRow>
                                 );
@@ -608,36 +441,19 @@ export default function HierarchicalTaskTable({
         </Table>
       </TableContainer>
 
-      <TablePagination
-        component="div"
-        count={totalCount}
+      <PaginationBar
+        embedded
+        zeroBasedPage
         page={page}
-        onPageChange={onPageChange}
+        pageCount={Math.max(1, Math.ceil(totalCount / rowsPerPage))}
+        totalCount={totalCount}
         rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={onRowsPerPageChange}
-        rowsPerPageOptions={[5, 10, 25, 50]}
-        labelRowsPerPage="Rows per page:"
-        labelDisplayedRows={({ from, to, count }) =>
-          `Showing ${from} to ${to} of ${count !== -1 ? count : `more than ${to}`} tasks`
-        }
-        sx={{
-          borderTop: '1px solid',
-          borderColor: 'divider',
-          bgcolor: (t) => (t.palette.mode === 'dark' ? 'transparent' : '#FAFBFC'),
-          '.MuiTablePagination-toolbar': {
-            px: 2.5,
-            minHeight: 56,
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            gap: 1,
-          },
-          '.MuiTablePagination-spacer': { flex: '1 1 auto' },
-          '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows, .MuiTablePagination-select':
-            {
-              fontSize: '0.8125rem',
-              fontWeight: 600,
-            },
-        }}
+        onPageChange={onPageChange}
+          onRowsPerPageChange={(n) => {
+            onRowsPerPageChange?.({ target: { value: String(n) } });
+          }}
+        rowsPerPageOptions={[20, 50, 100]}
+        itemLabel="tasks"
       />
     </Paper>
   );

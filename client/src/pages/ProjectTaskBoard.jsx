@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -6,7 +6,6 @@ import {
   Paper,
   Button,
   Stack,
-  CircularProgress,
   Snackbar,
   Alert,
   TextField,
@@ -16,20 +15,22 @@ import {
   DialogActions,
   MenuItem,
   useTheme,
+  Skeleton,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   CalendarTodayOutlined as CalendarIcon,
   Add as AddIcon,
-  Upload as UploadIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
-import TaskDetailsDrawer from '../components/TaskDetailsDrawer';
+import TaskDetailsDrawer, { splitTitleAndDescription } from '../components/TaskDetailsDrawer';
 import KanbanBoard from '../components/KanbanBoard';
 import {
   TaskBoardToolbar,
+  TaskBoardSummary,
   HierarchicalTaskTable,
   ALL_STATUSES,
+  STATUS_LABELS,
   PRIORITY_BADGES_LIGHT,
   PRIORITY_BADGES_DARK,
   normalizeLegacyStatus,
@@ -38,10 +39,13 @@ import { useProjectId } from '../hooks/useProjectId';
 import { usePermission } from '../hooks/usePermission';
 import { useRole } from '../context/RoleContext';
 import EmptyState from '../components/EmptyState';
+import EditModuleDialog from '../components/TaskBoard/EditModuleDialog';
 import StatusRemarkDialog, { needsStatusRemark } from '../components/StatusRemarkDialog';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
 import { getTaskProgressPercent } from '../utils/taskProgress';
-import { isOverdue, getOverdueDays } from '../utils/taskManagementConstants';
+import { isOverdue, getOverdueDays, computeTaskStats } from '../utils/taskManagementConstants';
+import { comparePhaseNames } from '../utils/phaseSort';
+import { tokens } from '../theme';
 
 const EMPTY_FILTERS = {
   phases: [],
@@ -51,6 +55,37 @@ const EMPTY_FILTERS = {
   priority: '',
   overdueOnly: false,
 };
+
+function getModuleKey(task, modulesById = {}) {
+  if (task.parentId && modulesById[task.parentId]) return task.parentId;
+  if (task.module && String(task.module).includes('-')) return String(task.module).split('-')[0];
+  if (task.module && modulesById[task.module]) return task.module;
+  if (task.module) return task.module;
+  return 'Unassigned';
+}
+
+function compareWorkTasksByPhase(a, b, modulesById = {}) {
+  const phaseCmp = comparePhaseNames(a.phase || 'Unassigned Phase', b.phase || 'Unassigned Phase');
+  if (phaseCmp) return phaseCmp;
+  const moduleCmp = String(getModuleKey(a, modulesById)).localeCompare(
+    String(getModuleKey(b, modulesById)),
+    undefined,
+    { numeric: true, sensitivity: 'base' }
+  );
+  if (moduleCmp) return moduleCmp;
+  return String(a.taskId || '').localeCompare(String(b.taskId || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+function buildModulesById(allTasks) {
+  const modulesById = {};
+  allTasks.forEach((t) => {
+    if (t.recordType === 'module') modulesById[t.taskId] = t;
+  });
+  return modulesById;
+}
 
 /** Build Phase → Module → Task tree from work items + module metadata */
 function buildPhaseTree(workTasks, allTasks, developers, { sortByOverdue = false } = {}) {
@@ -152,6 +187,7 @@ function buildPhaseTree(workTasks, allTasks, developers, { sortByOverdue = false
             );
           return {
             ...mod,
+            phaseName: phase.name,
             taskCount: total,
             completedTasks: completed,
             completionPct: weightedPct,
@@ -196,9 +232,9 @@ function buildPhaseTree(workTasks, allTasks, developers, { sortByOverdue = false
       if (sortByOverdue) {
         const maxA = Math.max(0, ...a.modules.flatMap((m) => m.tasks.map((t) => getOverdueDays(t))));
         const maxB = Math.max(0, ...b.modules.flatMap((m) => m.tasks.map((t) => getOverdueDays(t))));
-        return maxB - maxA || a.name.localeCompare(b.name, undefined, { numeric: true });
+        return maxB - maxA || comparePhaseNames(a.name, b.name);
       }
-      return a.name.localeCompare(b.name, undefined, { numeric: true });
+      return comparePhaseNames(a.name, b.name);
     });
 }
 
@@ -212,10 +248,12 @@ export default function ProjectTaskBoard() {
   const canStatusPerm = usePermission('task.status');
   const canAssignPerm = usePermission('task.assign');
   const canEditPerm = usePermission('task.edit');
+  const canDeletePerm = usePermission('task.delete');
   // Clients are view-only — never allow edit/status/assign UI
   const canStatus = !isClient && canStatusPerm;
   const canAssign = !isClient && canAssignPerm;
   const canEdit = !isClient && canEditPerm;
+  const canDelete = !isClient && canDeletePerm;
 
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -250,6 +288,8 @@ export default function ProjectTaskBoard() {
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [activeKpi, setActiveKpi] = useState(null);
   const [expandedPhases, setExpandedPhases] = useState({});
   const [expandedModules, setExpandedModules] = useState({});
 
@@ -270,6 +310,16 @@ export default function ProjectTaskBoard() {
     saving: false,
   });
   const [delayAnalysis, setDelayAnalysis] = useState(null);
+  const [deleteModuleDialog, setDeleteModuleDialog] = useState({
+    open: false,
+    mod: null,
+    deleting: false,
+  });
+  const [editModuleDialog, setEditModuleDialog] = useState({
+    open: false,
+    mod: null,
+    saving: false,
+  });
   const [newTask, setNewTask] = useState({
     taskName: '',
     taskId: '',
@@ -284,6 +334,11 @@ export default function ProjectTaskBoard() {
   const showAlert = (message, severity = 'success') => {
     setAlert({ open: true, message, severity });
   };
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   useEffect(() => {
     try {
@@ -329,7 +384,7 @@ export default function ProjectTaskBoard() {
     } catch (e) {
       console.error('Failed to load board tasks data:', e);
       setLoadError(true);
-      showAlert('Failed to load project details', 'error');
+      showAlert('Unable to load tasks.', 'error');
     } finally {
       setLoading(false);
     }
@@ -432,13 +487,13 @@ export default function ProjectTaskBoard() {
   const handleTaskUpdated = (updatedTask) => {
     setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
     setSelectedTask(updatedTask);
-    showAlert('Task saved successfully');
+    showAlert('Task updated successfully.');
   };
 
-  const handleDeleteTask = async (taskItem) => {
-    if (!taskItem?.id) return;
+  const handleDeleteTask = async (taskItem, { skipConfirm = false } = {}) => {
+    if (!taskItem?.id || !canDelete) return;
     const taskNameStr = taskItem.taskName || taskItem.taskId || 'this task';
-    if (!window.confirm(`Are you sure you want to delete "${taskNameStr}"?`)) return;
+    if (!skipConfirm && !window.confirm(`Are you sure you want to delete "${taskNameStr}"?`)) return;
     try {
       await api.deleteTask(taskItem.id);
       showAlert('Task deleted successfully');
@@ -450,16 +505,190 @@ export default function ProjectTaskBoard() {
     } catch (err) {
       console.error('Failed to delete task:', err);
       showAlert('Failed to delete task', 'error');
+      throw err;
+    }
+  };
+
+  const handleDeleteModuleRequest = (mod) => {
+    if (!canDelete || !mod || !(mod.tasks?.length > 0)) return;
+    setDeleteModuleDialog({ open: true, mod, deleting: false });
+  };
+
+  const handleDeleteModuleConfirm = async () => {
+    const { mod } = deleteModuleDialog;
+    if (!mod || !projectId) return;
+    setDeleteModuleDialog((prev) => ({ ...prev, deleting: true }));
+    try {
+      let result;
+      if (mod.moduleId === 'Unassigned') {
+        await Promise.all((mod.tasks || []).map((t) => api.deleteTask(t.id)));
+        result = { deletedTasks: mod.tasks?.length ?? 0 };
+        setTasks((prev) => prev.filter((t) => !(mod.tasks || []).some((mt) => mt.id === t.id)));
+      } else {
+        result = await api.deleteModule(projectId, mod.moduleId);
+        const tasksResponse = await api.getProjectTasks(projectId, { limit: -1 });
+        setTasks(tasksResponse.tasks);
+      }
+      const removedIds = new Set((mod.tasks || []).map((t) => t.id));
+      if (selectedTask && removedIds.has(selectedTask.id)) {
+        setSelectedTask(null);
+        setDrawerOpen(false);
+      }
+      const count = result.deletedTasks ?? mod.taskCount ?? 0;
+      const label =
+        mod.moduleId === 'Unassigned'
+          ? `Standalone tasks deleted (${count} removed).`
+          : `Module deleted (${count} task${count === 1 ? '' : 's'} removed).`;
+      showAlert(label);
+      setDeleteModuleDialog({ open: false, mod: null, deleting: false });
+    } catch (err) {
+      console.error('Failed to delete module:', err);
+      showAlert(err.response?.data?.error || 'Failed to delete module', 'error');
+      setDeleteModuleDialog((prev) => ({ ...prev, deleting: false }));
+    }
+  };
+
+  const handleEditModuleRequest = (mod) => {
+    if (!canEdit || !mod) return;
+    setEditModuleDialog({ open: true, mod, saving: false });
+  };
+
+  const handleEditModuleSave = async (form) => {
+    const { mod } = editModuleDialog;
+    if (!mod || !projectId) return;
+    setEditModuleDialog((prev) => ({ ...prev, saving: true }));
+    try {
+      const phase = form.phase.trim() || null;
+
+      if (mod.parentTask) {
+        await api.updateTask(mod.parentTask.id, {
+          taskName: form.name.trim(),
+          phase,
+          description: form.description.trim() || null,
+          status: form.status,
+        });
+        if (phase !== (mod.parentTask.phase || null)) {
+          await Promise.all(
+            (mod.tasks || []).map((t) => api.updateTask(t.id, { phase }))
+          );
+        }
+      } else if (mod.moduleId === 'Unassigned') {
+        const moduleName = form.name.trim();
+        if (moduleName) {
+          const moduleId =
+            form.moduleId.trim() ||
+            `M-${Date.now().toString(36).toUpperCase()}`;
+          await api.createTask(projectId, {
+            taskName: moduleName,
+            taskId: moduleId,
+            recordType: 'module',
+            module: moduleId,
+            phase,
+            description: form.description.trim() || null,
+            status: form.status || 'Upcoming',
+          });
+          await Promise.all(
+            (mod.tasks || []).map((t) =>
+              api.updateTask(t.id, {
+                parentId: moduleId,
+                module: moduleId,
+                phase,
+              })
+            )
+          );
+        } else {
+          await Promise.all(
+            (mod.tasks || []).map((t) => api.updateTask(t.id, { phase }))
+          );
+        }
+      } else {
+        const moduleKey = form.moduleId.trim() || mod.moduleId;
+        const moduleName = form.name.trim() || mod.name || moduleKey;
+        const hasModuleRecord = tasks.some(
+          (t) => t.recordType === 'module' && t.taskId === mod.moduleId
+        );
+        if (!hasModuleRecord && moduleName) {
+          await api.createTask(projectId, {
+            taskName: moduleName,
+            taskId: moduleKey,
+            recordType: 'module',
+            module: moduleKey,
+            phase,
+          });
+        }
+        await Promise.all(
+          (mod.tasks || []).map((t) =>
+            api.updateTask(t.id, {
+              module: moduleKey,
+              parentId: hasModuleRecord || moduleName ? moduleKey : t.parentId,
+              phase,
+            })
+          )
+        );
+      }
+
+      const tasksResponse = await api.getProjectTasks(projectId, { limit: -1 });
+      setTasks(tasksResponse.tasks);
+      showAlert('Module updated successfully.');
+      setEditModuleDialog({ open: false, mod: null, saving: false });
+    } catch (err) {
+      console.error('Failed to update module:', err);
+      showAlert(err.response?.data?.error || 'Failed to update module', 'error');
+      setEditModuleDialog((prev) => ({ ...prev, saving: false }));
+    }
+  };
+
+  const handleDuplicateTask = async (taskItem) => {
+    if (!projectId || !taskItem) return;
+    try {
+      const { title, description } = splitTitleAndDescription(taskItem.taskName, taskItem.description);
+      const created = await api.createTask(projectId, {
+        taskName: `${title || taskItem.taskName} (copy)`,
+        status: 'Upcoming',
+        phase: taskItem.phase || null,
+        module: taskItem.module || null,
+        priority: taskItem.priority || null,
+        description: description || taskItem.description || null,
+        tags: taskItem.tags || null,
+        dependencies: taskItem.dependencies || null,
+        estimatedHours: taskItem.estimatedHours ?? null,
+      });
+      setTasks((prev) => [...prev, created]);
+      setSelectedTask(created);
+      setDrawerOpen(true);
+      setDrawerStartEdit(false);
+      showAlert('Task duplicated successfully');
+    } catch (err) {
+      console.error('Failed to duplicate task:', err);
+      showAlert('Failed to duplicate task', 'error');
     }
   };
 
   const handleFilterChange = (key, value) => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'phases') {
+        const modulesById = buildModulesById(tasks);
+        const allowed = new Set();
+        tasks.forEach((t) => {
+          if (t.recordType === 'module') return;
+          const phase = t.phase || 'Unassigned Phase';
+          if (value.length && !value.includes(phase)) return;
+          allowed.add(getModuleKey(t, modulesById));
+        });
+        next.modules = prev.modules.filter((m) => allowed.has(m));
+      }
+      return next;
+    });
+    if (key === 'overdueOnly') setActiveKpi(value ? 'overdue' : null);
+    if (key === 'statuses') setActiveKpi(null);
   };
 
   const clearFilters = () => {
     setFilters(EMPTY_FILTERS);
     setSearchQuery('');
+    setDebouncedSearch('');
+    setActiveKpi(null);
   };
 
   const filteredTasks = useMemo(() => {
@@ -473,12 +702,8 @@ export default function ProjectTaskBoard() {
       }
 
       if (filters.modules.length > 0) {
-        const modKey =
-          task.parentId ||
-          (task.module && String(task.module).includes('-')
-            ? String(task.module).split('-')[0]
-            : task.module) ||
-          'Unassigned';
+        const modulesById = buildModulesById(tasks);
+        const modKey = getModuleKey(task, modulesById);
         if (!filters.modules.includes(modKey) && !filters.modules.includes(task.module)) {
           return false;
         }
@@ -497,8 +722,8 @@ export default function ProjectTaskBoard() {
         return false;
       }
 
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
+      if (debouncedSearch.trim()) {
+        const query = debouncedSearch.toLowerCase();
         const dev = developers.find(
           (d) => d.id === task.developerId || d.id === parseInt(task.developerId, 10)
         );
@@ -515,15 +740,20 @@ export default function ProjectTaskBoard() {
 
       return true;
     });
-  }, [tasks, filters, searchQuery, boardLayout, developers]);
+  }, [tasks, filters, debouncedSearch, boardLayout, developers]);
 
   const workTasks = useMemo(() => {
     const list = filteredTasks.filter((t) => t.recordType !== 'module');
+    const modulesById = buildModulesById(tasks);
     if (filters.overdueOnly) {
-      return [...list].sort((a, b) => getOverdueDays(b) - getOverdueDays(a));
+      return [...list].sort((a, b) => {
+        const overdue = getOverdueDays(b) - getOverdueDays(a);
+        if (overdue) return overdue;
+        return compareWorkTasksByPhase(a, b, modulesById);
+      });
     }
-    return list;
-  }, [filteredTasks, filters.overdueOnly]);
+    return [...list].sort((a, b) => compareWorkTasksByPhase(a, b, modulesById));
+  }, [filteredTasks, filters.overdueOnly, tasks]);
 
   const delayTaskMap = useMemo(() => {
     const map = {};
@@ -567,9 +797,16 @@ export default function ProjectTaskBoard() {
     [pagedWorkTasks, tasks, developers, filters.overdueOnly]
   );
 
+  const kpiStats = useMemo(() => computeTaskStats(tasks), [tasks]);
+
   useEffect(() => {
     setPage(0);
-  }, [searchQuery, filters, rowsPerPage]);
+  }, [debouncedSearch, filters, rowsPerPage]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(workTasks.length / rowsPerPage) - 1);
+    if (page > maxPage) setPage(maxPage);
+  }, [workTasks.length, rowsPerPage, page]);
 
   // Expand newly visible phases/modules by default
   useEffect(() => {
@@ -592,51 +829,58 @@ export default function ProjectTaskBoard() {
   }, [phaseTree]);
 
   const filterOptions = useMemo(() => {
-    const overdueCount = tasks.filter(
-      (t) => t.recordType !== 'module' && isOverdue(t)
-    ).length;
+    const modulesById = buildModulesById(tasks);
+    const overdueCount = tasks.filter((t) => t.recordType !== 'module' && isOverdue(t)).length;
 
     const phases = [
       ...new Set(tasks.map((t) => t.phase || 'Unassigned Phase').filter(Boolean)),
     ]
-      .sort()
+      .sort(comparePhaseNames)
       .map((p) => ({ value: p, label: p }));
 
     const moduleMap = new Map();
     tasks.forEach((t) => {
+      if (t.recordType === 'module') return;
+      const phase = t.phase || 'Unassigned Phase';
+      if (filters.phases.length > 0 && !filters.phases.includes(phase)) return;
+      const key = getModuleKey(t, modulesById);
+      const modRecord = modulesById[key];
+      const label = modRecord?.taskName || (key === 'Unassigned' ? 'Standalone tasks' : key);
+      if (!moduleMap.has(key)) {
+        moduleMap.set(key, label === key ? `Module ${key}` : `Module ${key} — ${label}`);
+      }
+    });
+    tasks.forEach((t) => {
       if (t.recordType === 'module' && !t.parentId) {
-        moduleMap.set(t.taskId, t.taskName || t.taskId);
-      } else if (t.module) {
-        const key = String(t.module).includes('-')
-          ? String(t.module).split('-')[0]
-          : t.module;
-        if (!moduleMap.has(key)) moduleMap.set(key, key);
+        const phase = t.phase || 'Unassigned Phase';
+        if (filters.phases.length > 0 && !filters.phases.includes(phase)) return;
+        if (!moduleMap.has(t.taskId)) moduleMap.set(t.taskId, t.taskName || t.taskId);
       }
     });
     const modules = Array.from(moduleMap.entries())
       .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
-      .map(([value, label]) => ({
-        value,
-        label: label === value ? `Module ${value}` : `Module ${value} — ${label}`,
-      }));
+      .map(([value, label]) => ({ value, label }));
 
-    const priorities = [
-      ...new Set(tasks.map((t) => t.priority).filter(Boolean)),
-    ]
+    const priorities = [...new Set(tasks.map((t) => t.priority).filter(Boolean))]
       .sort()
       .map((p) => ({ value: p, label: p }));
+
+    // Only show developers who are actually assigned to tasks in this project
+    const assignedDevIds = new Set(
+      tasks.filter((t) => t.recordType !== 'module' && t.developerId != null).map((t) => t.developerId)
+    );
+    const projectDevelopers = developers
+      .filter((d) => assignedDevIds.has(d.id))
+      .map((d) => ({ value: String(d.id), label: getDeveloperDisplayName(d) }));
 
     return {
       phases,
       modules,
-      developers: developers.map((d) => ({
-        value: String(d.id),
-        label: getDeveloperDisplayName(d),
-      })),
+      developers: projectDevelopers,
       priorities,
       overdueCount,
     };
-  }, [tasks, developers]);
+  }, [tasks, developers, filters.phases]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -644,30 +888,35 @@ export default function ProjectTaskBoard() {
     if (filters.modules.length) n += 1;
     if (filters.developer !== '' && filters.developer != null) n += 1;
     if (filters.statuses.length) n += 1;
-    if (filters.priority) n += 1;
     if (filters.overdueOnly) n += 1;
-    if (searchQuery.trim()) n += 1;
+    if (debouncedSearch.trim()) n += 1;
     return n;
-  }, [filters, searchQuery]);
+  }, [filters, debouncedSearch]);
 
-  const statusCounts = useMemo(() => {
-    const base = tasks.filter((t) => t.recordType !== 'module');
-    const counts = {};
-    ALL_STATUSES.forEach((s) => {
-      counts[s] = base.filter((t) => normalizeLegacyStatus(t.status) === s).length;
-    });
-    return counts;
-  }, [tasks]);
-
-  const toggleStatusChip = (statusVal) => {
-    setFilters((prev) => {
-      const cur = prev.statuses || [];
-      const next = cur.includes(statusVal)
-        ? cur.filter((s) => s !== statusVal)
-        : [...cur, statusVal];
-      return { ...prev, statuses: next };
-    });
-  };
+  const handleKpiClick = useCallback((key) => {
+    setActiveKpi(key);
+    if (key === 'total') {
+      setFilters(EMPTY_FILTERS);
+      setSearchQuery('');
+      setDebouncedSearch('');
+      return;
+    }
+    if (key === 'completed') {
+      setFilters((prev) => ({ ...prev, statuses: ['Completed'], overdueOnly: false }));
+      return;
+    }
+    if (key === 'inProgress') {
+      setFilters((prev) => ({
+        ...prev,
+        statuses: ['In Development', 'Testing', 'Assigned'],
+        overdueOnly: false,
+      }));
+      return;
+    }
+    if (key === 'overdue') {
+      setFilters((prev) => ({ ...prev, overdueOnly: true, statuses: [] }));
+    }
+  }, []);
 
   const PRIORITY_BADGES = isDark ? PRIORITY_BADGES_DARK : PRIORITY_BADGES_LIGHT;
 
@@ -717,14 +966,6 @@ export default function ProjectTaskBoard() {
       isClient ? `/client/${clientMeta?.token}/calendar` : `/projects/${projectId}/calendar`
     );
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
   if (loadError) {
     return (
       <Box
@@ -735,11 +976,11 @@ export default function ProjectTaskBoard() {
           alignItems: 'center',
           height: '80vh',
           gap: 2,
+          px: 2,
         }}
       >
         <Alert severity="error" sx={{ maxWidth: 480 }}>
-          Failed to load project data. Make sure the server is running and the database is
-          accessible.
+          Unable to load tasks.
         </Alert>
         <Button variant="contained" startIcon={<RefreshIcon />} onClick={loadData}>
           Retry
@@ -751,15 +992,15 @@ export default function ProjectTaskBoard() {
   return (
     <Box
       sx={{
-        px: { xs: 2, sm: 3, md: 4 },
-        py: { xs: 2.5, md: 3 },
+        px: { xs: 1.5, sm: 2, md: 2 },
+        py: { xs: 1.5, md: 2 },
         display: 'flex',
         flexDirection: 'column',
-        gap: 2,
+        gap: 1.5,
         width: '100%',
         maxWidth: '100%',
+        mx: 0,
         boxSizing: 'border-box',
-        fontFamily: "'Inter', sans-serif",
       }}
     >
       {isClient && (
@@ -767,13 +1008,10 @@ export default function ProjectTaskBoard() {
           elevation={0}
           sx={{
             p: { xs: 2, md: 2.25 },
-            borderRadius: '16px',
+            borderRadius: `${tokens.radius.card}px`,
             border: '1px solid',
             borderColor: 'divider',
-            background: (t) =>
-              t.palette.mode === 'dark'
-                ? 'linear-gradient(135deg, #1e3a5f 0%, #111827 100%)'
-                : 'linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)',
+            bgcolor: 'background.paper',
           }}
         >
           <Stack
@@ -783,7 +1021,7 @@ export default function ProjectTaskBoard() {
             gap={1.25}
           >
             <Box>
-              <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+              <Typography variant="h5" sx={{ fontWeight: 650, letterSpacing: '-0.02em' }}>
                 {project?.name || clientProject?.name || 'Project'}
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
@@ -805,6 +1043,20 @@ export default function ProjectTaskBoard() {
       )}
 
       <TaskBoardToolbar
+        projectName={project?.name}
+        projectDeliveryStatus={project?.deliveryStatus}
+        breadcrumbProjectId={projectId}
+        summarySlot={
+          !loading && !isClient && tasks.some((t) => t.recordType !== 'module') ? (
+            <TaskBoardSummary stats={kpiStats} activeKpi={activeKpi} onKpiClick={handleKpiClick} />
+          ) : loading ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,1fr)', md: 'repeat(4,1fr)' }, gap: 2 }}>
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} variant="rounded" height={96} sx={{ borderRadius: 3 }} />
+              ))}
+            </Box>
+          ) : null
+        }
         boardLayout={boardLayout}
         onBoardLayoutChange={setBoardLayout}
         searchQuery={searchQuery}
@@ -827,15 +1079,11 @@ export default function ProjectTaskBoard() {
         onImportCsv={() => navigate(`/projects/upload?projectId=${projectId}`)}
         onAddTask={() => setAddTaskOpen(true)}
         isClient={isClient}
-        statusCounts={statusCounts}
-        onStatusChipClick={toggleStatusChip}
-        activeStatusFilters={filters.statuses}
-        isDark={isDark}
       />
 
-      {tasks.length === 0 ? (
+      {!loading && tasks.length === 0 ? (
         <EmptyState
-          title="No tasks in this project"
+          title="No tasks in this project yet."
           description={
             isClient
               ? 'The shared project has no tasks yet. Check back once the admin imports or adds work items.'
@@ -846,35 +1094,31 @@ export default function ProjectTaskBoard() {
           actionPermission="task.edit"
           actionIcon={<AddIcon />}
         />
-      ) : filteredTasks.length === 0 ? (
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 4,
-            textAlign: 'center',
-            borderRadius: '16px',
-            borderStyle: 'dashed',
-          }}
-        >
+      ) : !loading && filteredTasks.length === 0 ? (
+        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', borderRadius: '16px', borderStyle: 'dashed' }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
-            No matching tasks
+            {filters.overdueOnly ? 'No overdue tasks' : 'No tasks match your current filters.'}
           </Typography>
           <Typography sx={{ color: 'text.secondary', mb: 2 }}>
-            Try clearing filters or search to see more results.
+            {filters.overdueOnly
+              ? 'Great! Everything is currently on schedule.'
+              : 'Try clearing filters or search to see more results.'}
           </Typography>
           <Button variant="outlined" onClick={clearFilters} sx={{ borderRadius: '10px' }}>
-            Clear filters
+            Clear Filters
           </Button>
         </Paper>
-      ) : boardLayout === 'kanban' ? (
+      ) : boardLayout === 'kanban' && !loading ? (
         <KanbanBoard
           tasks={filteredTasks}
           developers={developers}
           canStatus={canStatus}
           canEdit={canEdit}
+          canDelete={canDelete}
           onStatusChange={(taskId, newStatus) => handleStatusChange(taskId, newStatus)}
           onOpenTask={(task) => handleRowClick(task)}
           onEditTask={canEdit ? (task) => handleRowClick(task, true) : undefined}
+          onDeleteTask={canDelete ? (task) => handleDeleteTask(task) : undefined}
           onAddTask={
             canEdit
               ? (status) => {
@@ -895,6 +1139,7 @@ export default function ProjectTaskBoard() {
           canStatus={canStatus}
           canAssign={canAssign}
           canEdit={canEdit}
+          canDelete={canDelete}
           isClient={isClient}
           priorityBadges={PRIORITY_BADGES}
           expandedPhases={expandedPhases}
@@ -906,17 +1151,20 @@ export default function ProjectTaskBoard() {
             setExpandedModules((prev) => ({ ...prev, [id]: !(prev[id] !== false) }))
           }
           onRowClick={handleRowClick}
-          onDeleteTask={handleDeleteTask}
+          onDeleteTask={canDelete ? handleDeleteTask : undefined}
+          onDeleteModule={canDelete ? handleDeleteModuleRequest : undefined}
+          onEditModule={canEdit ? handleEditModuleRequest : undefined}
           onStatusChange={handleStatusChange}
           onDeveloperChange={handleDeveloperChange}
           page={page}
           rowsPerPage={rowsPerPage}
-          onPageChange={(_, newPage) => setPage(newPage)}
+          onPageChange={setPage}
           onRowsPerPageChange={(e) => {
             setRowsPerPage(parseInt(e.target.value, 10));
             setPage(0);
           }}
           totalCount={workTasks.length}
+          loading={loading}
           primaryDelayTaskId={primaryDelayTaskId}
           delayTaskMap={delayTaskMap}
         />
@@ -977,7 +1225,7 @@ export default function ProjectTaskBoard() {
               >
                 {ALL_STATUSES.map((s) => (
                   <MenuItem key={s} value={s}>
-                    {s}
+                    {STATUS_LABELS[s] || s}
                   </MenuItem>
                 ))}
               </TextField>
@@ -1050,6 +1298,79 @@ export default function ProjectTaskBoard() {
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={deleteModuleDialog.open}
+        onClose={() => {
+          if (!deleteModuleDialog.deleting) {
+            setDeleteModuleDialog({ open: false, mod: null, deleting: false });
+          }
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          {deleteModuleDialog.mod?.moduleId === 'Unassigned'
+            ? 'Delete Standalone Tasks?'
+            : 'Delete Module?'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            {deleteModuleDialog.mod?.moduleId === 'Unassigned' ? (
+              <>
+                This will permanently delete all{' '}
+                <strong>
+                  {deleteModuleDialog.mod?.taskCount ?? 0} standalone task
+                  {(deleteModuleDialog.mod?.taskCount ?? 0) === 1 ? '' : 's'}
+                </strong>{' '}
+                in <strong>{deleteModuleDialog.mod?.phaseName || 'this phase'}</strong>. This cannot
+                be undone.
+              </>
+            ) : (
+              <>
+                This will permanently delete{' '}
+                <strong>
+                  {deleteModuleDialog.mod?.name || deleteModuleDialog.mod?.moduleId || 'this module'}
+                </strong>{' '}
+                and all{' '}
+                <strong>
+                  {deleteModuleDialog.mod?.taskCount ?? 0} task
+                  {(deleteModuleDialog.mod?.taskCount ?? 0) === 1 ? '' : 's'}
+                </strong>{' '}
+                inside it, including nested modules. This cannot be undone.
+              </>
+            )}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => setDeleteModuleDialog({ open: false, mod: null, deleting: false })}
+            disabled={deleteModuleDialog.deleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            disabled={deleteModuleDialog.deleting}
+            onClick={handleDeleteModuleConfirm}
+          >
+            {deleteModuleDialog.deleting ? 'Deleting…' : deleteModuleDialog.mod?.moduleId === 'Unassigned' ? 'Delete Tasks' : 'Delete Module'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <EditModuleDialog
+        open={editModuleDialog.open}
+        mod={editModuleDialog.mod}
+        saving={editModuleDialog.saving}
+        onClose={() => {
+          if (!editModuleDialog.saving) {
+            setEditModuleDialog({ open: false, mod: null, saving: false });
+          }
+        }}
+        onSave={handleEditModuleSave}
+      />
+
       <TaskDetailsDrawer
         open={drawerOpen}
         onClose={() => {
@@ -1057,8 +1378,13 @@ export default function ProjectTaskBoard() {
           setDrawerStartEdit(false);
         }}
         task={selectedTask}
+        project={project}
+        allTasks={tasks}
         developers={developers}
         onTaskUpdated={handleTaskUpdated}
+        onOpenTask={(t) => setSelectedTask(t)}
+        onDeleteTask={canDelete ? (t) => handleDeleteTask(t, { skipConfirm: true }) : undefined}
+        onDuplicateTask={canEdit ? handleDuplicateTask : undefined}
         startInEditMode={drawerStartEdit}
       />
 

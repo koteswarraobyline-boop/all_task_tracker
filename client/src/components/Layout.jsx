@@ -43,6 +43,11 @@ import {
   ViewKanban as TaskBoardNavIcon,
   Timeline as TimelineNavIcon,
   Home as HomeIcon,
+  AccountTree as HierarchyNavIcon,
+  Map as RoadmapNavIcon,
+  ChatBubbleOutlined as CommentsNavIcon,
+  Groups as TeamNavIcon,
+  Analytics as AnalyticsNavIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
 import { useRole } from '../context/RoleContext';
@@ -51,7 +56,7 @@ import { tokens } from '../theme';
 
 const DRAWER_WIDTH = tokens.layout.sidebar;
 const DRAWER_COLLAPSED = tokens.layout.sidebarCollapsed;
-const SIDEBAR_GRADIENT = `linear-gradient(180deg, ${tokens.colors.sidebar} 0%, ${tokens.colors.sidebarEnd} 100%)`;
+const SIDEBAR_BG = tokens.colors.navBg;
 
 function NavSectionLabel({ children, collapsed }) {
   if (collapsed) return null;
@@ -59,14 +64,14 @@ function NavSectionLabel({ children, collapsed }) {
     <Typography
       variant="caption"
       sx={{
-        px: 1.5,
-        mb: 1,
-        mt: 2,
+        px: 1.25,
+        mb: 0.75,
+        mt: 1.75,
         display: 'block',
-        color: '#94A3B8',
-        fontWeight: 700,
+        color: tokens.colors.navMuted,
+        fontWeight: 500,
         textTransform: 'uppercase',
-        fontSize: '0.72rem',
+        fontSize: '0.65rem',
         letterSpacing: '0.06em',
       }}
     >
@@ -76,8 +81,8 @@ function NavSectionLabel({ children, collapsed }) {
 }
 
 function NavItem({ text, icon, path, active, onNavigate, collapsed }) {
-  const labelColor = active ? '#FFFFFF' : '#E2E8F0';
-  const iconColor = active ? '#FFFFFF' : '#CBD5E1';
+  const labelColor = active ? tokens.colors.navActiveText : tokens.colors.navText;
+  const iconColor = active ? tokens.colors.navActiveText : tokens.colors.navMuted;
 
   const button = (
     <ListItem disablePadding>
@@ -86,22 +91,17 @@ function NavItem({ text, icon, path, active, onNavigate, collapsed }) {
         aria-current={active ? 'page' : undefined}
         sx={{
           borderRadius: `${tokens.radius.button}px`,
-          py: 1.25,
-          px: 2,
-          minHeight: 44,
+          py: 0.65,
+          px: collapsed ? 1 : 1.25,
+          minHeight: 36,
           justifyContent: collapsed ? 'center' : 'flex-start',
-          background: active
-            ? 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)'
-            : 'transparent',
+          backgroundColor: active ? tokens.colors.navActiveBg : 'transparent',
           color: labelColor,
           '&:hover': {
-            backgroundColor: active ? undefined : 'rgba(255,255,255,0.08)',
-            background: active
-              ? 'linear-gradient(135deg, #4338CA 0%, #4F46E5 100%)'
-              : undefined,
-            color: '#FFFFFF',
-            '& .MuiListItemIcon-root': { color: '#FFFFFF' },
-            '& .MuiListItemText-primary': { color: '#FFFFFF' },
+            backgroundColor: active ? tokens.colors.navActiveBg : '#F8FAFC',
+            color: tokens.colors.navActiveText,
+            '& .MuiListItemIcon-root': { color: tokens.colors.navActiveText },
+            '& .MuiListItemText-primary': { color: tokens.colors.navActiveText },
           },
           transition: tokens.motion.fast,
         }}
@@ -109,9 +109,9 @@ function NavItem({ text, icon, path, active, onNavigate, collapsed }) {
         <ListItemIcon
           sx={{
             color: `${iconColor} !important`,
-            minWidth: collapsed ? 0 : 40,
+            minWidth: collapsed ? 0 : 34,
             justifyContent: 'center',
-            '& .MuiSvgIcon-root': { fontSize: 22, color: 'inherit' },
+            '& .MuiSvgIcon-root': { fontSize: 18, color: 'inherit' },
           }}
         >
           {icon}
@@ -127,14 +127,14 @@ function NavItem({ text, icon, path, active, onNavigate, collapsed }) {
             }}
             slotProps={{
               primary: {
-                fontSize: '0.875rem',
-                fontWeight: active ? 700 : 600,
+                fontSize: '0.8125rem',
+                fontWeight: active ? 650 : 500,
                 noWrap: true,
                 sx: {
                   color: `${labelColor} !important`,
                   opacity: 1,
                 },
-              }
+              },
             }}
           />
         )}
@@ -152,7 +152,7 @@ function NavItem({ text, icon, path, active, onNavigate, collapsed }) {
   return button;
 }
 
-export default function Layout({ children, mode, toggleMode }) {
+export default function Layout({ children, toggleMode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return localStorage.getItem('sidebarCollapsed') === 'true';
@@ -169,6 +169,11 @@ export default function Layout({ children, mode, toggleMode }) {
   const drawerWidth = sidebarCollapsed ? DRAWER_COLLAPSED : DRAWER_WIDTH;
 
   const matchDashboard = matchPath('/projects/:id/dashboard', location.pathname);
+  const matchOverview = matchPath('/projects/:id/overview', location.pathname);
+  const matchHierarchy = matchPath('/projects/:id/hierarchy', location.pathname);
+  const matchRoadmap = matchPath('/projects/:id/roadmap', location.pathname);
+  const matchComments = matchPath('/projects/:id/comments', location.pathname);
+  const matchTeam = matchPath('/projects/:id/team', location.pathname);
   const matchTasks = matchPath('/projects/:id/tasks', location.pathname);
   const matchCalendar = matchPath('/projects/:id/calendar', location.pathname);
   const matchTimeline = matchPath('/projects/:id/timeline', location.pathname);
@@ -177,11 +182,20 @@ export default function Layout({ children, mode, toggleMode }) {
   const matchUpload = matchPath('/projects/upload', location.pathname);
   const isProjectsListPage = location.pathname === '/projects';
   const hideTopAppBar =
-    location.pathname === '/dashboard' || isProjectsListPage || Boolean(matchDashboard);
+    location.pathname === '/dashboard' ||
+    isProjectsListPage ||
+    Boolean(matchDashboard) ||
+    Boolean(matchOverview) ||
+    Boolean(matchTasks);
   const clientMatch = matchPath('/client/:token/*', location.pathname);
   const clientToken = clientMatch?.params?.token || clientMeta?.token;
 
   const activeProjectId =
+    matchOverview?.params?.id ||
+    matchHierarchy?.params?.id ||
+    matchRoadmap?.params?.id ||
+    matchComments?.params?.id ||
+    matchTeam?.params?.id ||
     matchDashboard?.params?.id ||
     matchTasks?.params?.id ||
     matchCalendar?.params?.id ||
@@ -255,17 +269,16 @@ export default function Layout({ children, mode, toggleMode }) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        background: SIDEBAR_GRADIENT,
-        color: '#E2E8F0',
-        // Force readable light labels/icons on dark sidebar
+        backgroundColor: `${SIDEBAR_BG} !important`,
+        color: tokens.colors.navText,
         '& .MuiListItemButton-root:not([aria-current="page"]) .MuiListItemText-primary': {
-          color: '#E2E8F0 !important',
+          color: `${tokens.colors.navText} !important`,
         },
         '& .MuiListItemButton-root:not([aria-current="page"]) .MuiListItemIcon-root': {
-          color: '#CBD5E1 !important',
+          color: `${tokens.colors.navMuted} !important`,
         },
         '& .MuiListItemButton-root[aria-current="page"] .MuiListItemText-primary, & .MuiListItemButton-root[aria-current="page"] .MuiListItemIcon-root': {
-          color: '#FFFFFF !important',
+          color: `${tokens.colors.navActiveText} !important`,
         },
         '& .MuiListItemIcon-root .MuiSvgIcon-root': {
           color: 'inherit !important',
@@ -276,9 +289,9 @@ export default function Layout({ children, mode, toggleMode }) {
         sx={{
           gap: 1.25,
           borderBottom: '1px solid',
-          borderColor: 'rgba(148,163,184,0.16)',
+          borderColor: tokens.colors.navBorder,
           px: 2,
-          minHeight: '64px !important',
+          minHeight: `${tokens.layout.header}px !important`,
           justifyContent: collapsed ? 'center' : 'flex-start',
         }}
       >
@@ -288,10 +301,10 @@ export default function Layout({ children, mode, toggleMode }) {
             variant="h6"
             noWrap
             sx={{
-              fontWeight: 800,
-              fontSize: '1.15rem',
-              letterSpacing: '-0.02em',
-              color: '#FFFFFF',
+              fontWeight: 650,
+              fontSize: '0.95rem',
+              letterSpacing: '-0.015em',
+              color: tokens.colors.text,
             }}
           >
             Task Tracker
@@ -304,13 +317,13 @@ export default function Layout({ children, mode, toggleMode }) {
           flexGrow: 1,
           overflowY: 'auto',
           overflowX: 'hidden',
-          px: 2,
-          py: 3,
+          px: 1.25,
+          py: 1.5,
         }}
       >
         {!isClient && (
           <>
-            <List sx={{ p: 0, mb: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+            <List sx={{ p: 0, mb: 0.5, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
               <NavItem
                 text="Dashboard"
                 icon={<HomeIcon />}
@@ -327,25 +340,17 @@ export default function Layout({ children, mode, toggleMode }) {
                 onNavigate={go}
                 collapsed={collapsed}
               />
-            </List>
-
-            <NavSectionLabel collapsed={collapsed}>People</NavSectionLabel>
-            <List sx={{ p: 0, mb: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
               <NavItem
                 text="Developers"
                 icon={<DevelopersIcon />}
                 path="/developers"
-                active={location.pathname === '/developers'}
+                active={location.pathname.startsWith('/developers')}
                 onNavigate={go}
                 collapsed={collapsed}
               />
-            </List>
-
-            <NavSectionLabel collapsed={collapsed}>Administration</NavSectionLabel>
-            <List sx={{ p: 0, mb: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
               <Can permission="users.manage">
                 <NavItem
-                  text="User Management"
+                  text="Users"
                   icon={<UsersIcon />}
                   path="/users"
                   active={location.pathname === '/users'}
@@ -368,105 +373,55 @@ export default function Layout({ children, mode, toggleMode }) {
         )}
 
         {(activeProject || (isClient && clientProject)) && projectBasePath && (
-          <Box sx={{ mt: isClient ? 0 : 2.5 }}>
+          <Box
+            sx={{
+              mt: isClient ? 0 : 1.5,
+              pt: isClient ? 0 : 1.5,
+              borderTop: isClient ? 'none' : `1px solid ${tokens.colors.navBorder}`,
+            }}
+          >
             {!collapsed && (
-              <>
+              <Box sx={{ px: 1.25, mb: 1, minWidth: 0 }}>
                 <Typography
-                  variant="caption"
                   sx={{
-                    px: 1.5,
-                    mb: 1,
-                    display: 'block',
-                    color: '#94A3B8',
-                    fontWeight: 700,
+                    color: tokens.colors.navMuted,
+                    fontWeight: 500,
+                    fontSize: '0.65rem',
+                    letterSpacing: '0.04em',
                     textTransform: 'uppercase',
-                    fontSize: '0.75rem',
-                    letterSpacing: '0.05em',
+                    mb: 0.25,
                   }}
                 >
-                  {isClient ? 'Shared Project' : 'Active Project'}
+                  Project
                 </Typography>
-
-                <Paper
-                  variant="outlined"
+                <Typography
                   sx={{
-                    mx: 0,
-                    mt: 1,
-                    mb: 2.5,
-                    p: 2,
-                    borderRadius: 2,
-                    bgcolor: 'rgba(255,255,255,0.04)',
-                    borderColor: 'rgba(148,163,184,0.2)',
-                    minWidth: 0,
+                    fontWeight: 600,
+                    color: tokens.colors.text,
+                    fontSize: '0.8125rem',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
                   }}
+                  title={(activeProject || clientProject)?.name}
                 >
-                  <Typography
-                    variant="subtitle2"
-                    sx={{
-                      fontWeight: 750,
-                      color: '#A5B4FC',
-                      fontSize: '0.875rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title={(activeProject || clientProject)?.name}
-                  >
-                    {(activeProject || clientProject)?.name}
-                  </Typography>
-                  <Typography
-                    variant="caption"
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 0.75,
-                      mt: 0.75,
-                      fontSize: '0.75rem',
-                      minWidth: 0,
-                      color: '#94A3B8',
-                    }}
-                  >
-                    <ClientIcon sx={{ fontSize: 14, flexShrink: 0 }} />
-                    <Box
-                      component="span"
-                      sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    >
-                      {isClient
-                        ? clientMeta?.clientName || clientMeta?.company || 'Client View'
-                        : (activeProject?.clientName || 'Internal Project')}
-                    </Box>
-                  </Typography>
-                  {isClient && (
-                    <Chip
-                      size="small"
-                      label="Read Only"
-                      sx={{
-                        mt: 1.25,
-                        height: 22,
-                        fontWeight: 750,
-                        fontSize: '0.65rem',
-                        bgcolor: 'rgba(59,130,246,0.2)',
-                        color: '#93C5FD',
-                        border: '1px solid rgba(147,197,253,0.35)',
-                      }}
-                    />
-                  )}
-                </Paper>
-              </>
+                  {(activeProject || clientProject)?.name}
+                </Typography>
+              </Box>
             )}
 
-            <List sx={{ p: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <NavSectionLabel collapsed={collapsed}>Plan</NavSectionLabel>
+            <List sx={{ p: 0, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
               {(isClient
                 ? [
-                    { text: 'Overview', icon: <DashboardIcon />, path: `${projectBasePath}/overview` },
-                    { text: 'Tasks', icon: <TasksIcon />, path: `${projectBasePath}/tasks` },
-                    { text: 'Calendar', icon: <CalendarIcon />, path: `${projectBasePath}/calendar` },
+                    { text: 'Overview', icon: <DashboardIcon />, path: `${projectBasePath}/overview`, active: Boolean(matchOverview) },
+                    { text: 'Tasks', icon: <TasksIcon />, path: `${projectBasePath}/tasks`, active: Boolean(matchTasks) },
+                    { text: 'Calendar', icon: <CalendarIcon />, path: `${projectBasePath}/calendar`, active: Boolean(matchCalendar) },
                   ]
                 : [
-                    { text: 'Overview', icon: <DashboardIcon />, path: `${projectBasePath}/dashboard` },
-                    { text: 'Task Board', icon: <TaskBoardNavIcon />, path: `${projectBasePath}/tasks` },
-                    { text: 'Calendar', icon: <CalendarIcon />, path: `${projectBasePath}/calendar` },
-                    { text: 'Timeline', icon: <TimelineNavIcon />, path: `${projectBasePath}/timeline` },
+                    { text: 'Overview', icon: <DashboardIcon />, path: `${projectBasePath}/overview`, active: Boolean(matchOverview) },
+                    { text: 'Hierarchy', icon: <HierarchyNavIcon />, path: `${projectBasePath}/hierarchy`, active: Boolean(matchHierarchy) },
+                    { text: 'Roadmap', icon: <RoadmapNavIcon />, path: `${projectBasePath}/roadmap`, active: Boolean(matchRoadmap) },
                   ]
               ).map((item) => (
                 <NavItem
@@ -474,43 +429,44 @@ export default function Layout({ children, mode, toggleMode }) {
                   text={item.text}
                   icon={item.icon}
                   path={item.path}
-                  active={
-                    item.text === 'Overview'
-                      ? location.pathname.includes('/overview') || location.pathname.includes('/dashboard')
-                      : item.text === 'Task Board'
-                        ? Boolean(matchTasks)
-                        : item.text === 'Timeline'
-                          ? Boolean(matchTimeline)
-                          : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
-                  }
-                  onNavigate={(path) => {
-                    go(path);
-                  }}
+                  active={item.active}
+                  onNavigate={go}
                   collapsed={collapsed}
                 />
               ))}
             </List>
+
+            {!isClient && (
+              <>
+                <NavSectionLabel collapsed={collapsed}>Work</NavSectionLabel>
+                <List sx={{ p: 0, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                  {[
+                    { text: 'Board', icon: <TaskBoardNavIcon />, path: `${projectBasePath}/tasks`, active: Boolean(matchTasks) },
+                    { text: 'Timeline', icon: <TimelineNavIcon />, path: `${projectBasePath}/timeline`, active: Boolean(matchTimeline) },
+                    { text: 'Calendar', icon: <CalendarIcon />, path: `${projectBasePath}/calendar`, active: Boolean(matchCalendar) },
+                    { text: 'Team', icon: <TeamNavIcon />, path: `${projectBasePath}/team`, active: Boolean(matchTeam) },
+                    { text: 'Comments', icon: <CommentsNavIcon />, path: `${projectBasePath}/comments`, active: Boolean(matchComments) },
+                    { text: 'Analytics', icon: <AnalyticsNavIcon />, path: `${projectBasePath}/dashboard`, active: Boolean(matchDashboard) },
+                  ].map((item) => (
+                    <NavItem
+                      key={item.text}
+                      text={item.text}
+                      icon={item.icon}
+                      path={item.path}
+                      active={item.active}
+                      onNavigate={go}
+                      collapsed={collapsed}
+                    />
+                  ))}
+                </List>
+              </>
+            )}
           </Box>
         )}
       </Box>
 
-      <Box sx={{ px: 2, pb: 2, mt: 'auto' }}>
-        {isClient && !collapsed && (
-          <Paper
-            elevation={0}
-            sx={{
-              mb: 2,
-              p: 1.75,
-              borderRadius: 2,
-              bgcolor: 'rgba(59,130,246,0.12)',
-              border: '1px solid rgba(147,197,253,0.25)',
-            }}
-          >
-            
-          </Paper>
-        )}
-
-        <Divider sx={{ borderColor: 'rgba(148,163,184,0.16)', mb: 1.5 }} />
+      <Box sx={{ px: 1.5, pb: 1.5, mt: 'auto' }}>
+        <Divider sx={{ borderColor: tokens.colors.navBorder, mb: 1.25 }} />
 
         <Tooltip title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} placement="right">
           <IconButton
@@ -521,8 +477,8 @@ export default function Layout({ children, mode, toggleMode }) {
               borderRadius: `${tokens.radius.button}px`,
               py: 1,
               mb: 1,
-              color: '#CBD5E1',
-              '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+              color: tokens.colors.navMuted,
+              '&:hover': { bgcolor: '#F8FAFC' },
               display: { xs: 'none', md: 'inline-flex' },
               transition: tokens.motion.fast,
             }}
@@ -540,7 +496,7 @@ export default function Layout({ children, mode, toggleMode }) {
                   width: '100%',
                   borderRadius: `${tokens.radius.button}px`,
                   py: 1,
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+                  '&:hover': { bgcolor: '#F8FAFC' },
                 }}
               >
                 <Avatar
@@ -568,7 +524,7 @@ export default function Layout({ children, mode, toggleMode }) {
                 borderRadius: `${tokens.radius.button}px`,
                 cursor: 'pointer',
                 transition: tokens.motion.fast,
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+                '&:hover': { bgcolor: '#F8FAFC' },
               }}
             >
               <Avatar
@@ -587,14 +543,14 @@ export default function Layout({ children, mode, toggleMode }) {
                 <Typography
                   variant="subtitle2"
                   noWrap
-                  sx={{ fontWeight: 700, color: '#FFFFFF', lineHeight: 1.3 }}
+                  sx={{ fontWeight: 700, color: tokens.colors.text, lineHeight: 1.3 }}
                 >
                   {profileRoleLabel}
                 </Typography>
                 <Typography
                   variant="caption"
                   noWrap
-                  sx={{ color: '#94A3B8', display: 'block', lineHeight: 1.3 }}
+                  sx={{ color: tokens.colors.navMuted, display: 'block', lineHeight: 1.3 }}
                 >
                   {profileSubtitle}
                 </Typography>
@@ -629,14 +585,14 @@ export default function Layout({ children, mode, toggleMode }) {
                 <Typography
                   variant="subtitle2"
                   noWrap
-                  sx={{ fontWeight: 700, color: '#FFFFFF', lineHeight: 1.3 }}
+                  sx={{ fontWeight: 700, color: tokens.colors.text, lineHeight: 1.3 }}
                 >
                   {profileRoleLabel}
                 </Typography>
                 <Typography
                   variant="caption"
                   noWrap
-                  sx={{ color: '#94A3B8', display: 'block', lineHeight: 1.3 }}
+                  sx={{ color: tokens.colors.navMuted, display: 'block', lineHeight: 1.3 }}
                 >
                   {profileSubtitle}
                 </Typography>
@@ -661,8 +617,7 @@ export default function Layout({ children, mode, toggleMode }) {
           width: 'auto',
           borderRadius: 0,
           backgroundImage: 'none',
-          backgroundColor: (t) => (t.palette.mode === 'dark' ? 'rgba(17, 24, 39, 0.92)' : 'rgba(255, 255, 255, 0.92)'),
-          backdropFilter: 'blur(12px)',
+          backgroundColor: (t) => (t.palette.mode === 'dark' ? t.palette.background.paper : '#FFFFFF'),
           borderBottom: '1px solid',
           borderColor: 'divider',
           boxShadow: 'none',
@@ -818,7 +773,8 @@ export default function Layout({ children, mode, toggleMode }) {
             '& .MuiDrawer-paper': {
               boxSizing: 'border-box',
               width: DRAWER_WIDTH,
-              background: SIDEBAR_GRADIENT,
+              backgroundColor: `${SIDEBAR_BG} !important`,
+              backgroundImage: 'none',
               border: 'none',
             },
           }}
@@ -836,8 +792,8 @@ export default function Layout({ children, mode, toggleMode }) {
             left: 0,
             borderRadius: 0,
             borderRight: '1px solid',
-            borderColor: 'rgba(148,163,184,0.16)',
-            background: SIDEBAR_GRADIENT,
+            borderColor: tokens.colors.navBorder,
+            backgroundColor: SIDEBAR_BG,
             overflow: 'hidden',
             zIndex: 1100,
             transition: `width ${tokens.motion.sidebar}`,

@@ -23,6 +23,7 @@ async function ensureDatabaseExists() {
       port: dbPort,
       user: dbUser,
       password: dbPass,
+      connectTimeout: 10000,
     });
     await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\`;`);
     await connection.end();
@@ -40,6 +41,9 @@ const sequelize = new Sequelize(dbName, dbUser, dbPass, {
   port: dbPort,
   dialect: 'mysql',
   logging: false,
+  dialectOptions: {
+    connectTimeout: 10000,
+  },
   pool: {
     max: 5,
     min: 0,

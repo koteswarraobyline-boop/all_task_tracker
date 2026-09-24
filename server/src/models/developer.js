@@ -27,6 +27,35 @@ const Developer = sequelize.define('Developer', {
     allowNull: false,
     defaultValue: '#1976d2',
   },
+  role: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  team: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  status: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'Active',
+    validate: {
+      isIn: [['Active', 'On Leave', 'Inactive']],
+    },
+  },
+  skills: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  allocation: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 100,
+    validate: {
+      min: 0,
+      max: 100,
+    },
+  },
 }, {
   tableName: 'developers',
 });

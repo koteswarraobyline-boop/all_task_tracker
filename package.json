@@ -1,18 +1,18 @@
 {
   "name": "task-tracker",
   "private": true,
-  "version": "1.0.0",
-  "description": "Task Tracker — monorepo helpers for local + PM2 hosting",
   "scripts": {
-    "dev:server": "npm --prefix server run dev",
-    "dev:client": "npm --prefix client run dev",
-    "build": "npm --prefix client run build",
-    "start": "npm --prefix server start",
-    "pm2:start": "npm --prefix server run pm2:start",
-    "pm2:reload": "npm --prefix server run pm2:reload",
-    "pm2:restart": "npm --prefix server run pm2:restart",
-    "pm2:logs": "npm --prefix server run pm2:logs",
-    "pm2:status": "npm --prefix server run pm2:status",
-    "deploy": "npm --prefix server run deploy"
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "build": "npm run build --prefix client",
+    "test": "npm test --prefix server",
+    "start:prod": "npm run build && npm run start --prefix server",
+    "deploy": "npm run build --prefix client && npm run deploy --prefix server",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:reload": "pm2 reload ecosystem.config.cjs --update-env",
+    "pm2:restart": "pm2 restart task-tracker-api",
+    "pm2:stop": "pm2 stop task-tracker-api",
+    "pm2:logs": "pm2 logs task-tracker-api",
+    "pm2:status": "pm2 status"
   }
 }

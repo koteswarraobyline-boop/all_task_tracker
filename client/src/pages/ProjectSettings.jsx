@@ -16,7 +16,6 @@ import {
   Upload as UploadIcon,
 } from '@mui/icons-material';
 import PageContainer from '../components/PageContainer';
-import { ProjectNavTabs } from '../components/ProjectDashboard';
 import { formatProjectId, formatShortDate } from '../components/ProjectDashboard/dashboardHelpers';
 import EditProjectDialog from '../components/EditProjectDialog';
 import UpdateDeliveryDateDialog from '../components/UpdateDeliveryDateDialog';
@@ -56,13 +55,12 @@ export default function ProjectSettings() {
 
   return (
     <PageContainer maxWidth={960}>
-      <Typography variant="h1" sx={{ fontSize: '1.75rem', fontWeight: 800, mb: 0.5 }}>
+      <Typography variant="h1" sx={{ fontSize: '1.5rem', fontWeight: 650, mb: 0.5 }}>
         Project Settings
       </Typography>
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
         {project ? `${formatProjectId(project.id)} · ${project.name}` : 'Configure project details'}
       </Typography>
-      <ProjectNavTabs projectId={projectId} />
 
       {loading ? (
         <Skeleton variant="rounded" height={280} sx={{ borderRadius: 3 }} />

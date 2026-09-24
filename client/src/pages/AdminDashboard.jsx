@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -17,55 +17,64 @@ import {
   Alert,
   Badge,
   Tooltip,
+  Menu,
+  MenuItem,
 } from '@mui/material';
-import {
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts';
-import {
-  FolderOpen as TotalIcon,
-  CheckCircle as CompletedIcon,
-  AccessTime as ProgressIcon,
-  WarningAmber as RiskIcon,
-  Cancel as OverdueIcon,
-  Search as SearchIcon,
-  NotificationsNone as NotificationsIcon,
-  CalendarMonth as CalendarIcon,
-  Schedule as ScheduleLateIcon,
-  ArrowForward as ArrowIcon,
-  UploadFile as ImportIcon,
-  Add as AddIcon,
-  Share as ShareIcon,
-  ViewKanban as BoardIcon,
-  Timeline as TimelineIcon,
-  Assignment as TasksTotalIcon,
-  Code as DevIcon,
-  Science as TestingIcon,
-  Block as BlockedIcon,
-  PauseCircleOutlined as OnHoldIcon,
-  TrendingUp as TrendUpIcon,
-  TrendingDown as TrendDownIcon,
-  Remove as TrendFlatIcon,
-  People as DevelopersIcon,
-} from '@mui/icons-material';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import CancelIcon from '@mui/icons-material/Cancel';
+import SearchIcon from '@mui/icons-material/Search';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import CodeIcon from '@mui/icons-material/Code';
+import ScienceIcon from '@mui/icons-material/Science';
+import BlockIcon from '@mui/icons-material/Block';
+import PauseCircleOutlinedIcon from '@mui/icons-material/PauseCircleOutlined';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import RemoveIcon from '@mui/icons-material/Remove';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import api from '../services/api';
 import PageContainer from '../components/PageContainer';
 import EmptyState from '../components/EmptyState';
 import Can from '../components/Can';
-import TaskDetailsDrawer from '../components/TaskDetailsDrawer';
-import ShareProjectDialog from '../components/ShareProjectDialog';
+import SimpleDonutChart from '../components/SimpleDonutChart';
 import { tokens } from '../theme';
 import { timeAgo } from '../utils/formatters';
 import { formatShortDate } from '../utils/deliveryHealth';
 import { STATUS_LABELS, normalizeLegacyStatus } from '../components/TaskBoard/constants';
 
+const TaskDetailsDrawer = React.lazy(() => import('../components/TaskDetailsDrawer'));
+
+const TotalIcon = FolderOpenIcon;
+const CompletedIcon = CheckCircleIcon;
+const ProgressIcon = AccessTimeIcon;
+const RiskIcon = WarningAmberIcon;
+const OverdueIcon = CancelIcon;
+const NotificationsIcon = NotificationsNoneIcon;
+const CalendarIcon = CalendarMonthIcon;
+const ScheduleLateIcon = ScheduleIcon;
+const ArrowIcon = ArrowForwardIcon;
+const TasksTotalIcon = AssignmentIcon;
+const DevIcon = CodeIcon;
+const TestingIcon = ScienceIcon;
+const BlockedIcon = BlockIcon;
+const OnHoldIcon = PauseCircleOutlinedIcon;
+const TrendUpIcon = TrendingUpIcon;
+const TrendDownIcon = TrendingDownIcon;
+const TrendFlatIcon = RemoveIcon;
+const ExportIcon = FileDownloadIcon;
+
 const CARD_SX = {
   height: '100%',
   borderRadius: `${tokens.radius.card}px`,
   boxShadow: tokens.shadow.card,
-  border: '1px solid #E5E7EB',
+  border: `1px solid ${tokens.colors.border}`,
   bgcolor: tokens.colors.card,
   transition: tokens.motion.fast,
 };
@@ -73,20 +82,20 @@ const CARD_SX = {
 const TASK_STATUS_ICONS = {
   total: { icon: TasksTotalIcon, tint: '#EEF2FF', color: tokens.colors.primary },
   completed: { icon: CompletedIcon, tint: '#DCFCE7', color: tokens.colors.success },
-  inDevelopment: { icon: DevIcon, tint: '#FFEDD5', color: '#EA580C' },
-  testing: { icon: TestingIcon, tint: '#CFFAFE', color: '#0891B2' },
+  inDevelopment: { icon: DevIcon, tint: '#EEF2FF', color: tokens.colors.primary },
+  testing: { icon: TestingIcon, tint: '#F5F3FF', color: '#7C3AED' },
   blocked: { icon: BlockedIcon, tint: '#FEE2E2', color: tokens.colors.danger },
-  onHold: { icon: OnHoldIcon, tint: '#F1F5F9', color: '#64748B' },
+  onHold: { icon: OnHoldIcon, tint: '#FFFBEB', color: tokens.colors.warning },
 };
 
 const STATUS_CHIP = {
-  'In Development': { bgcolor: '#DBEAFE', color: '#1D4ED8' },
-  Testing: { bgcolor: '#CFFAFE', color: '#0E7490' },
-  Completed: { bgcolor: '#DCFCE7', color: '#15803D' },
-  Assigned: { bgcolor: '#EEF2FF', color: '#4338CA' },
+  'In Development': { bgcolor: '#EFF6FF', color: '#2563EB' },
+  Testing: { bgcolor: '#EFF6FF', color: '#2563EB' },
+  Completed: { bgcolor: '#ECFDF5', color: '#15803D' },
+  Assigned: { bgcolor: '#EFF6FF', color: '#2563EB' },
   Blocked: { bgcolor: '#FEE2E2', color: '#B91C1C' },
-  'On Hold': { bgcolor: '#F1F5F9', color: '#475569' },
-  Upcoming: { bgcolor: '#EFF6FF', color: '#2563EB' },
+  'On Hold': { bgcolor: '#FFFBEB', color: '#D97706' },
+  Upcoming: { bgcolor: '#F8FAFC', color: '#64748B' },
 };
 
 const LINK_BUTTON_SX = {
@@ -130,7 +139,7 @@ function KpiCard({ label, value, icon, tint, iconColor, trend, trendVariant, onC
         width: '100%',
         textAlign: 'left',
         cursor: onClick ? 'pointer' : 'default',
-        '&:hover': { boxShadow: tokens.shadow.hover, transform: 'translateY(-2px)' },
+        '&:hover': { boxShadow: tokens.shadow.hover },
         '&:focus-visible': {
           outline: `3px solid rgba(79,70,229,0.35)`,
           outlineOffset: 2,
@@ -140,8 +149,8 @@ function KpiCard({ label, value, icon, tint, iconColor, trend, trendVariant, onC
       <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
         <Box
           sx={{
-            width: 44,
-            height: 44,
+            width: 36,
+            height: 36,
             borderRadius: `${tokens.radius.button}px`,
             bgcolor: tint,
             color: iconColor,
@@ -157,7 +166,7 @@ function KpiCard({ label, value, icon, tint, iconColor, trend, trendVariant, onC
         <Typography sx={{ fontSize: '0.8125rem', fontWeight: 600, color: tokens.colors.textSecondary, mb: 0.5 }}>
           {label}
         </Typography>
-        <Typography sx={{ fontSize: '1.85rem', fontWeight: 800, color: tokens.colors.text, lineHeight: 1.15, mb: trendDisplay ? 1.25 : 0 }}>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 650, color: tokens.colors.text, lineHeight: 1.15, mb: trendDisplay ? 1.25 : 0 }}>
           {value}
         </Typography>
         {trendDisplay ? (
@@ -207,7 +216,7 @@ function SectionCard({ title, action, children, error, onRetry, loading, skeleto
     <Card sx={CARD_SX}>
       <CardContent sx={{ p: 2.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-          <Typography component="h2" sx={{ fontWeight: 800, fontSize: '1.05rem', color: tokens.colors.text }}>
+          <Typography component="h2" sx={{ fontWeight: 600, fontSize: '0.9375rem', color: tokens.colors.text }}>
             {title}
           </Typography>
           {action}
@@ -237,22 +246,29 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [shareOpen, setShareOpen] = useState(false);
-  const [shareProject, setShareProject] = useState(null);
   const [drawerTask, setDrawerTask] = useState(null);
   const [drawerDevelopers, setDrawerDevelopers] = useState([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerLoading, setDrawerLoading] = useState(false);
+  const [exportAnchor, setExportAnchor] = useState(null);
+  const [projects, setProjects] = useState([]);
+  const [exportError, setExportError] = useState('');
+  const [exportSuccess, setExportSuccess] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const payload = await api.getGlobalDashboard();
+      const [payload, projectRows] = await Promise.all([
+        api.getGlobalDashboard(),
+        api.getProjects().catch(() => []),
+      ]);
       setData(payload);
+      setProjects(payload?.hasProjects ? (projectRows || []) : []);
     } catch (err) {
       setError(err.response?.data?.error || 'Unable to load dashboard data.');
       setData(null);
+      setProjects([]);
     } finally {
       setLoading(false);
     }
@@ -261,6 +277,26 @@ export default function AdminDashboard() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleGlobalExport = async (format) => {
+    setExportAnchor(null);
+    setExportError('');
+    setExportSuccess('');
+    if (!data) {
+      setExportError('Dashboard data is not ready yet.');
+      return;
+    }
+    try {
+      const exportMod = await import('../utils/projectExport');
+      if (format === 'csv') exportMod.exportGlobalDashboardCsv(data, projects);
+      else if (format === 'xlsx') await exportMod.exportGlobalDashboardExcel(data, projects);
+      else if (format === 'pdf') await exportMod.exportGlobalDashboardPdf(data, projects);
+      setExportSuccess(`${format.toUpperCase()} export downloaded`);
+    } catch (err) {
+      console.error('Dashboard export failed:', err);
+      setExportError('Export failed. Please try again.');
+    }
+  };
 
   const defaultProjectId = data?.defaultProjectId;
 
@@ -328,13 +364,15 @@ export default function AdminDashboard() {
       <Stack
         component="header"
         direction={{ xs: 'column', md: 'row' }}
-        justifyContent="space-between"
-        alignItems={{ xs: 'stretch', md: 'flex-start' }}
         spacing={2}
-        sx={{ mb: 3.5 }}
+        sx={{
+          mb: 3.5,
+          justifyContent: 'space-between',
+          alignItems: { xs: 'stretch', md: 'flex-start' },
+        }}
       >
         <Box sx={{ minWidth: 0 }}>
-          <Typography component="h1" sx={{ fontWeight: 800, fontSize: { xs: '1.75rem', md: '2rem' }, color: tokens.colors.text, lineHeight: 1.2 }}>
+          <Typography component="h1" sx={{ fontWeight: 600, fontSize: { xs: '1.35rem', md: '1.5rem' }, color: tokens.colors.text, lineHeight: 1.25 }}>
             Admin Dashboard
           </Typography>
           <Typography sx={{ color: tokens.colors.textSecondary, fontWeight: 500, mt: 0.75, fontSize: '0.9375rem' }}>
@@ -344,8 +382,12 @@ export default function AdminDashboard() {
         <Stack
           direction="row"
           spacing={1.5}
-          alignItems="center"
-          sx={{ width: { xs: '100%', md: 'auto' }, flexShrink: 0, justifyContent: { md: 'flex-end' } }}
+          sx={{
+            width: { xs: '100%', md: 'auto' },
+            flexShrink: 0,
+            alignItems: 'center',
+            justifyContent: { md: 'flex-end' },
+          }}
         >
           <Box component="form" onSubmit={handleSearchSubmit} sx={{ width: { xs: '100%', md: 380, lg: 440 } }}>
             <TextField
@@ -385,18 +427,36 @@ export default function AdminDashboard() {
                 '& .MuiOutlinedInput-root': {
                   borderRadius: `${tokens.radius.button}px`,
                   bgcolor: tokens.colors.card,
-                  minHeight: 46,
-                  boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+                  minHeight: 40,
+                  boxShadow: 'none',
                 },
               }}
             />
           </Box>
+          <Can permission="report.export">
+            <Button
+              variant="outlined"
+              startIcon={<ExportIcon />}
+              onClick={(e) => setExportAnchor(e.currentTarget)}
+              disabled={loading || !data}
+              sx={{
+                height: 40,
+                flexShrink: 0,
+                fontWeight: 700,
+                borderRadius: `${tokens.radius.button}px`,
+                bgcolor: tokens.colors.card,
+                textTransform: 'none',
+              }}
+            >
+              Export
+            </Button>
+          </Can>
           <Tooltip title="Notifications">
             <IconButton
               aria-label="Notifications"
               sx={{
-                width: 46,
-                height: 46,
+                width: 40,
+                height: 40,
                 border: `1px solid ${tokens.colors.border}`,
                 borderRadius: `${tokens.radius.button}px`,
                 bgcolor: tokens.colors.card,
@@ -500,23 +560,15 @@ export default function AdminDashboard() {
               <SectionCard title="Delivery Health Overview" loading={loading} skeletonHeight={280}>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} alignItems="center">
                   <Box sx={{ position: 'relative', width: '100%', maxWidth: 220, height: 220, mx: 'auto' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={deliveryChart}
-                          dataKey="count"
-                          nameKey="label"
-                          innerRadius={62}
-                          outerRadius={92}
-                          paddingAngle={2}
-                          aria-label="Delivery health by project status"
-                        >
-                          {deliveryChart.map((entry) => (
-                            <Cell key={entry.key} fill={entry.color} stroke="none" />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <SimpleDonutChart
+                      data={deliveryChart}
+                      valueKey="count"
+                      innerRadius={62}
+                      outerRadius={92}
+                      size={220}
+                      paddingAngle={2}
+                      ariaLabel="Delivery health by project status"
+                    />
                     <Box
                       sx={{
                         position: 'absolute',
@@ -528,7 +580,7 @@ export default function AdminDashboard() {
                         pointerEvents: 'none',
                       }}
                     >
-                      <Typography sx={{ fontWeight: 800, fontSize: '1.75rem', color: tokens.colors.text, lineHeight: 1 }}>
+                      <Typography sx={{ fontWeight: 650, fontSize: '1.5rem', color: tokens.colors.text, lineHeight: 1 }}>
                         {data?.deliveryHealth?.total ?? 0}
                       </Typography>
                       <Typography sx={{ fontSize: '0.8125rem', color: tokens.colors.textSecondary, fontWeight: 600 }}>
@@ -632,7 +684,7 @@ export default function AdminDashboard() {
                               {block.label}
                             </Typography>
                           </Stack>
-                          <Typography sx={{ fontWeight: 800, fontSize: '1.35rem', color: tokens.colors.text, lineHeight: 1.2 }}>
+                          <Typography sx={{ fontWeight: 650, fontSize: '1.15rem', color: tokens.colors.text, lineHeight: 1.2 }}>
                             {block.value.toLocaleString()}
                           </Typography>
                           {block.percent != null ? (
@@ -649,7 +701,11 @@ export default function AdminDashboard() {
             </Grid>
           </Grid>
 
-          <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
+          <Grid
+            container
+            spacing={2.5}
+            sx={{ mb: 2.5, contentVisibility: 'auto', containIntrinsicSize: '0 520px' }}
+          >
             <Grid size={{ xs: 12, md: 4 }}>
               <SectionCard
                 title="Upcoming Deadlines"
@@ -826,79 +882,41 @@ export default function AdminDashboard() {
               </SectionCard>
             </Grid>
           </Grid>
-
-          <SectionCard title="Quick Actions" loading={loading} skeletonHeight={72}>
-            <Box
-              sx={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 1.25,
-              }}
-            >
-              <Can permission="csv.upload">
-                <Button variant="outlined" startIcon={<ImportIcon />} onClick={() => navigate('/projects/upload')} sx={{ borderRadius: `${tokens.radius.button}px`, fontWeight: 700, textTransform: 'none', minHeight: 44, px: 2, borderColor: tokens.colors.border, color: tokens.colors.text }}>
-                  Import CSV
-                </Button>
-              </Can>
-              <Can permission="project.create">
-                <Button variant="outlined" startIcon={<AddIcon />} onClick={() => navigate('/projects/upload')} sx={{ borderRadius: `${tokens.radius.button}px`, fontWeight: 700, textTransform: 'none', minHeight: 44, px: 2, borderColor: tokens.colors.border, color: tokens.colors.text }}>
-                  Add Project
-                </Button>
-              </Can>
-              <Can permission="project.share">
-                <Button
-                  variant="outlined"
-                  startIcon={<ShareIcon />}
-                  disabled={!defaultProjectId}
-                  onClick={async () => {
-                    try {
-                      const projects = await api.getProjects();
-                      const picked = projects.find((p) => p.id === defaultProjectId);
-                      setShareProject(picked || { id: defaultProjectId, name: 'Project' });
-                      setShareOpen(true);
-                    } catch {
-                      setShareProject({ id: defaultProjectId, name: 'Project' });
-                      setShareOpen(true);
-                    }
-                  }}
-                  sx={{ borderRadius: `${tokens.radius.button}px`, fontWeight: 700, textTransform: 'none', minHeight: 44, px: 2, borderColor: tokens.colors.border, color: tokens.colors.text }}
-                >
-                  Share Project
-                </Button>
-              </Can>
-              <Button variant="outlined" startIcon={<BoardIcon />} onClick={() => navigate(projectPath('/tasks'))} sx={{ borderRadius: `${tokens.radius.button}px`, fontWeight: 700, textTransform: 'none', minHeight: 44, px: 2, borderColor: tokens.colors.border, color: tokens.colors.text }}>
-                Task Board
-              </Button>
-              <Button variant="outlined" startIcon={<CalendarIcon />} onClick={() => navigate(projectPath('/calendar'))} sx={{ borderRadius: `${tokens.radius.button}px`, fontWeight: 700, textTransform: 'none', minHeight: 44, px: 2, borderColor: tokens.colors.border, color: tokens.colors.text }}>
-                Calendar
-              </Button>
-              <Button variant="outlined" startIcon={<TimelineIcon />} onClick={() => navigate(projectPath('/timeline'))} sx={{ borderRadius: `${tokens.radius.button}px`, fontWeight: 700, textTransform: 'none', minHeight: 44, px: 2, borderColor: tokens.colors.border, color: tokens.colors.text }}>
-                Timeline
-              </Button>
-              <Can permission="developer.manage">
-                <Button variant="outlined" startIcon={<DevelopersIcon />} onClick={() => navigate('/developers')} sx={{ borderRadius: `${tokens.radius.button}px`, fontWeight: 700, textTransform: 'none', minHeight: 44, px: 2, borderColor: tokens.colors.border, color: tokens.colors.text }}>
-                  Developers
-                </Button>
-              </Can>
-            </Box>
-          </SectionCard>
         </>
       )}
 
-      {shareProject ? (
-        <ShareProjectDialog open={shareOpen} onClose={() => setShareOpen(false)} project={shareProject} />
+      {exportSuccess ? (
+        <Alert severity="success" onClose={() => setExportSuccess('')} sx={{ mb: 2 }}>
+          {exportSuccess}
+        </Alert>
       ) : null}
 
-      <TaskDetailsDrawer
-        open={drawerOpen && !drawerLoading}
-        onClose={() => {
-          setDrawerOpen(false);
-          setDrawerTask(null);
-        }}
-        task={drawerTask}
-        developers={drawerDevelopers}
-        onTaskUpdated={load}
-      />
+      {exportError ? (
+        <Alert severity="error" onClose={() => setExportError('')} sx={{ mb: 2 }}>
+          {exportError}
+        </Alert>
+      ) : null}
+
+      <Suspense fallback={null}>
+        <TaskDetailsDrawer
+          open={drawerOpen && !drawerLoading}
+          onClose={() => {
+            setDrawerOpen(false);
+            setDrawerTask(null);
+          }}
+          task={drawerTask}
+          developers={drawerDevelopers}
+          onTaskUpdated={load}
+        />
+      </Suspense>
+
+      <Menu anchorEl={exportAnchor} open={Boolean(exportAnchor)} onClose={() => setExportAnchor(null)}>
+        <MenuItem onClick={() => handleGlobalExport('csv')}>Export CSV</MenuItem>
+        <MenuItem onClick={() => handleGlobalExport('xlsx')}>Export Excel (.xlsx)</MenuItem>
+        <Can permission="report.export.pdf">
+          <MenuItem onClick={() => handleGlobalExport('pdf')}>Export PDF</MenuItem>
+        </Can>
+      </Menu>
     </PageContainer>
   );
 }

@@ -16,6 +16,16 @@ const tokenLimiter = rateLimit({
 // Public client share-link validation + scoped tasks
 router.get('/client/:token', tokenLimiter, clientAccessController.validateToken);
 router.get('/client/:token/tasks', tokenLimiter, clientAccessController.getClientTasks);
+router.get(
+  '/client/:token/tasks/:taskId/collab',
+  tokenLimiter,
+  clientAccessController.getClientTaskCollab
+);
+router.post(
+  '/client/:token/tasks/:taskId/comments',
+  tokenLimiter,
+  clientAccessController.createClientTaskComment
+);
 router.get('/client/:token/delay-analysis', tokenLimiter, clientAccessController.getClientDelayAnalysis);
 
 // Admin CRUD for client access records

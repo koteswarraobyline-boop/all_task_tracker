@@ -15,4 +15,11 @@ router.put('/tasks/:id', authMiddleware, taskController.updateTask);
 // DELETE /tasks/:id
 router.delete('/tasks/:id', authMiddleware, taskController.deleteTask);
 
+// DELETE /projects/:id/modules/:moduleKey
+router.delete(
+  '/projects/:id/modules/:moduleKey',
+  authMiddleware,
+  taskController.deleteModule
+);
+
 module.exports = router;

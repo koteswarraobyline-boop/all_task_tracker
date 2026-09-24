@@ -27,6 +27,8 @@ export default function StatusRemarkDialog({
   saving = false,
   onCancel,
   onConfirm,
+  title = 'Reason Required',
+  message = 'Please provide a reason for this status.',
 }) {
   const [remark, setRemark] = useState(initialRemark || '');
 
@@ -34,23 +36,19 @@ export default function StatusRemarkDialog({
     if (open) setRemark(initialRemark || '');
   }, [open, initialRemark]);
 
-  const label = status === 'On Hold' ? 'On Hold' : 'Blocked';
   const trimmed = remark.trim();
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onCancel} fullWidth maxWidth="xs">
-      <DialogTitle sx={{ fontWeight: 800, pb: 1 }}>
-        {label} — add a note
-      </DialogTitle>
+      <DialogTitle sx={{ fontWeight: 800, pb: 1 }}>{title}</DialogTitle>
       <DialogContent>
         {taskName ? (
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }} noWrap>
             {taskName}
           </Typography>
         ) : null}
-        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-          This note is shown on the overview timeline so the team can see why the task is{' '}
-          {label.toLowerCase()}.
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+          {message}
         </Typography>
         <TextField
           autoFocus
@@ -58,11 +56,7 @@ export default function StatusRemarkDialog({
           multiline
           minRows={3}
           label={status === 'On Hold' ? 'Hold reason' : 'Block reason'}
-          placeholder={
-            status === 'On Hold'
-              ? 'e.g. Waiting on client approval…'
-              : 'e.g. API dependency blocked…'
-          }
+          placeholder="Enter reason..."
           value={remark}
           onChange={(e) => setRemark(e.target.value)}
           onKeyDown={(e) => {
@@ -80,9 +74,8 @@ export default function StatusRemarkDialog({
           variant="contained"
           disabled={saving || !trimmed}
           onClick={() => onConfirm(trimmed)}
-          color={status === 'Blocked' ? 'error' : 'warning'}
         >
-          {saving ? 'Saving…' : `Set ${label}`}
+          {saving ? 'Saving…' : 'Save'}
         </Button>
       </DialogActions>
     </Dialog>

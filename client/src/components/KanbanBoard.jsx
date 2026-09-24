@@ -63,47 +63,47 @@ export const KANBAN_COLUMNS = [
     statuses: ['Assigned'],
     primaryStatus: 'Assigned',
     accent: '#2563EB',
-    tint: '#EFF6FF',
-    headerTint: '#BFDBFE',
+    tint: '#F8FBFF',
+    headerTint: '#EFF6FF',
   },
   {
     id: 'progress',
     title: 'In Progress',
     statuses: ['In Development', 'Blocked'],
     primaryStatus: 'In Development',
-    accent: '#4F46E5',
-    tint: '#EEF2FF',
-    headerTint: '#C7D2FE',
+    accent: '#2563EB',
+    tint: '#F8FBFF',
+    headerTint: '#EFF6FF',
   },
   {
     id: 'testing',
     title: 'Testing',
     statuses: ['Testing', 'Code Review'],
     primaryStatus: 'Testing',
-    accent: '#D97706',
-    tint: '#FFFBEB',
-    headerTint: '#FDE68A',
+    accent: '#2563EB',
+    tint: '#F8FBFF',
+    headerTint: '#EFF6FF',
   },
   {
     id: 'completed',
     title: 'Completed',
     statuses: ['Completed'],
     primaryStatus: 'Completed',
-    accent: '#16A34A',
-    tint: '#F0FDF4',
-    headerTint: '#BBF7D0',
+    accent: '#15803D',
+    tint: '#F8FAFC',
+    headerTint: '#ECFDF5',
   },
 ];
 
 const MODULE_COLORS = [
   '#2563EB',
-  '#7C3AED',
-  '#DB2777',
-  '#EA580C',
-  '#059669',
-  '#0891B2',
-  '#4F46E5',
-  '#CA8A04',
+  '#1E40AF',
+  '#1E293B',
+  '#64748B',
+  '#15803D',
+  '#0F766E',
+  '#1D4ED8',
+  '#475569',
 ];
 
 function columnForStatus(status) {
@@ -133,11 +133,13 @@ const KanbanColumn = memo(function KanbanColumn({
   tasks,
   canStatus,
   canEdit,
+  canDelete,
   isOver,
   collapsedModules,
   onToggleModule,
   onOpen,
   onEdit,
+  onDelete,
   onAddTask,
   groupByModule,
 }) {
@@ -264,7 +266,7 @@ const KanbanColumn = memo(function KanbanColumn({
             <Typography
               component="h2"
               sx={{
-                fontWeight: 800,
+                fontWeight: 650,
                 fontSize: '0.875rem',
                 letterSpacing: '-0.01em',
                 color: '#0F172A',
@@ -429,8 +431,10 @@ const KanbanColumn = memo(function KanbanColumn({
                         columnAccent={column.accent}
                         canStatus={canStatus}
                         canEdit={canEdit}
+                        canDelete={canDelete}
                         onOpen={onOpen}
                         onEdit={onEdit}
+                        onDelete={onDelete}
                       />
                     ))}
                   </Collapse>
@@ -509,11 +513,13 @@ export default function KanbanBoard({
   developers = [],
   canStatus,
   canEdit,
+  canDelete = false,
   loading = false,
   error = null,
   onStatusChange,
   onOpenTask,
   onEditTask,
+  onDeleteTask,
   onAddTask,
   onRetry,
 }) {
@@ -940,11 +946,13 @@ export default function KanbanBoard({
                 tasks={tasksByColumn[column.id] || []}
                 canStatus={canStatus}
                 canEdit={canEdit}
+                canDelete={canDelete}
                 isOver={overColumnId === column.id}
                 collapsedModules={collapsedModules}
                 onToggleModule={toggleModule}
                 onOpen={onOpenTask}
                 onEdit={onEditTask}
+                onDelete={onDeleteTask}
                 onAddTask={onAddTask}
                 groupByModule={groupByModule}
               />

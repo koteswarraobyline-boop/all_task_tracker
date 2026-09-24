@@ -29,7 +29,6 @@ import {
   Chip,
   LinearProgress,
   Menu,
-  Pagination,
   Paper,
   ToggleButton,
   ToggleButtonGroup,
@@ -73,6 +72,7 @@ import UpdateDeliveryDateDialog from '../components/UpdateDeliveryDateDialog';
 import EditProjectDialog from '../components/EditProjectDialog';
 import Can from '../components/Can';
 import PageContainer from '../components/PageContainer';
+import PaginationBar from '../components/PaginationBar';
 import { ProjectHealthBadge, DelayAnalysisDrawer } from '../components/DeliveryHealth';
 import { DELIVERY_STATUS_COLORS, deliveryTimingText } from '../utils/deliveryHealth';
 import { tokens } from '../theme';
@@ -83,7 +83,7 @@ const FAVORITES_KEY = 'tt_project_favorites';
 const STATUS_CHIP = {
   Active: { bgcolor: '#D1FAE5', color: '#047857' },
   Completed: { bgcolor: '#DBEAFE', color: '#1D4ED8' },
-  'On Hold': { bgcolor: '#FFEDD5', color: '#C2410C' },
+  'On Hold': { bgcolor: '#FFFBEB', color: '#D97706' },
   Delayed: { bgcolor: '#FEE2E2', color: '#B91C1C' },
   Planned: { bgcolor: '#F1F5F9', color: '#475569' },
   Archived: { bgcolor: '#F1F5F9', color: '#475569' },
@@ -317,7 +317,7 @@ function KpiStripCard({ label, value, sub, icon, tint, iconColor }) {
         <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: 'text.secondary', mb: 0.25 }}>
           {label}
         </Typography>
-        <Typography sx={{ fontSize: '1.5rem', fontWeight: 800, lineHeight: 1.2, color: 'text.primary' }}>
+        <Typography sx={{ fontSize: '1.35rem', fontWeight: 650, lineHeight: 1.2, color: 'text.primary' }}>
           {value}
         </Typography>
         {sub ? (
@@ -351,7 +351,7 @@ function ProjectCard({
       layout
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -4 }}
+      whileHover={{ y: 0 }}
       transition={{ duration: 0.22 }}
       elevation={0}
       role="button"
@@ -589,7 +589,6 @@ export default function Projects() {
   const [menuProj, setMenuProj] = useState(null);
   const [editProj, setEditProj] = useState(null);
   const [dateDialogProj, setDateDialogProj] = useState(null);
-  const [delayDrawerProj, setDelayDrawerProj] = useState(null);
   const [delayAnalysis, setDelayAnalysis] = useState(null);
   const [delayDrawerOpen, setDelayDrawerOpen] = useState(false);
   const [moreAnchor, setMoreAnchor] = useState(null);
@@ -685,7 +684,6 @@ export default function Projects() {
 
   const openDelayAnalysis = async (proj) => {
     if (!proj?.id) return;
-    setDelayDrawerProj(proj);
     setDelayDrawerOpen(true);
     try {
       const analysis = await api.getProjectDelayAnalysis(proj.id);
@@ -763,8 +761,6 @@ export default function Projects() {
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
   const paged = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-  const from = filtered.length === 0 ? 0 : (page - 1) * rowsPerPage + 1;
-  const to = Math.min(page * rowsPerPage, filtered.length);
 
   const overdueCount = useMemo(
     () => projects.filter((p) => p.deliveryStatus === 'OVERDUE' || p.isProjectOverdue).length,
@@ -850,7 +846,7 @@ export default function Projects() {
   };
 
   return (
-    <PageContainer maxWidth={1600} sx={{ py: { xs: 2, md: 2.5 }, px: { xs: 2, md: 3 } }}>
+    <PageContainer maxWidth="100%" sx={{ maxWidth: '100%', px: { xs: 1.5, sm: 2, md: 2 }, py: { xs: 1.5, md: 2 } }}>
       {/* Unified page header — matches reference layout */}
       <Box
         sx={{
@@ -1435,45 +1431,19 @@ export default function Projects() {
             </Paper>
           )}
 
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, mt: 3 }}
-          >
-            <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
-              Showing {from} to {to} of {filtered.length} projects
-            </Typography>
-            <Stack direction="row" useFlexGap sx={{ alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-              <Pagination
-                count={pageCount}
-                page={page}
-                onChange={(_e, v) => setPage(v)}
-                color="primary"
-                shape="rounded"
-                size="small"
-              />
-              <TextField
-                select
-                size="small"
-                label="Rows per page"
-                value={rowsPerPage}
-                onChange={(e) => {
-                  setRowsPerPage(Number(e.target.value));
-                  setPage(1);
-                }}
-                sx={{
-                  minWidth: 130,
-                  '& .MuiOutlinedInput-root': { height: 36, borderRadius: 2, bgcolor: tokens.colors.card },
-                  '& .MuiSelect-select': { fontSize: '0.8rem', fontWeight: 600 },
-                }}
-              >
-                {[8, 16, 24, 48].map((n) => (
-                  <MenuItem key={n} value={n}>
-                    {n}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Stack>
-          </Stack>
+          <PaginationBar
+            page={page}
+            pageCount={pageCount}
+            totalCount={filtered.length}
+            rowsPerPage={rowsPerPage}
+            onPageChange={setPage}
+            onRowsPerPageChange={(n) => {
+              setRowsPerPage(n);
+              setPage(1);
+            }}
+            rowsPerPageOptions={[8, 16, 24, 48]}
+            itemLabel="projects"
+          />
         </>
       )}
 
@@ -1497,16 +1467,18 @@ export default function Projects() {
         <MenuItem onClick={() => { fetchProjects(); setMoreAnchor(null); }}>
           <RefreshIcon fontSize="small" sx={{ mr: 1.5 }} /> Refresh
         </MenuItem>
-        <MenuItem
-          onClick={() => {
-            exportProjectsCsv(filtered);
-            setMoreAnchor(null);
-            showAlert(`Exported ${filtered.length} projects`);
-          }}
-          disabled={!filtered.length}
-        >
-          <ExportIcon fontSize="small" sx={{ mr: 1.5 }} /> Export CSV
-        </MenuItem>
+        <Can permission="report.export">
+          <MenuItem
+            onClick={() => {
+              exportProjectsCsv(filtered);
+              setMoreAnchor(null);
+              showAlert(`Exported ${filtered.length} projects`);
+            }}
+            disabled={!filtered.length}
+          >
+            <ExportIcon fontSize="small" sx={{ mr: 1.5 }} /> Export CSV
+          </MenuItem>
+        </Can>
         <MenuItem
           onClick={() => {
             resetFilters();
@@ -1542,7 +1514,7 @@ export default function Projects() {
         </MenuItem>
         <MenuItem
           onClick={() => {
-            navigate(`/projects/${menuProj?.id}/dashboard`);
+            navigate(`/projects/${menuProj?.id}/overview`);
             setMenuAnchor(null);
           }}
         >
@@ -1631,7 +1603,6 @@ export default function Projects() {
         onClose={() => {
           setDelayDrawerOpen(false);
           setDelayAnalysis(null);
-          setDelayDrawerProj(null);
         }}
         analysis={delayAnalysis}
       />

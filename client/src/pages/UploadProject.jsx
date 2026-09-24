@@ -1296,7 +1296,6 @@ export default function UploadProject() {
           bgcolor: '#F8FAFC',
           zIndex: 5,
           pb: 1,
-          mt: 2.5,
           boxShadow: '0 -4px 16px rgba(15,23,42,0.04)',
         }}
       >

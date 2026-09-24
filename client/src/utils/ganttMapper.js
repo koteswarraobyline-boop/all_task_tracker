@@ -7,6 +7,7 @@
 import { getTaskProgressPercent } from './taskProgress';
 import { getStatusDisplayLabel, getStatusColor } from './taskManagementConstants';
 import { getDeveloperDisplayName } from './developerDisplay';
+import { comparePhaseNames } from './phaseSort';
 
 /** Workflow status → simplified timeline status for display. */
 export const TIMELINE_STATUS = {
@@ -22,20 +23,20 @@ export const TIMELINE_STATUS = {
  * Yellow=Pending, Red=Blocked, Gray=Cancelled.
  */
 export const STATUS_BAR_COLORS = {
-  Upcoming: '#EAB308',
-  Assigned: '#EAB308',
+  Upcoming: '#64748B',
+  Assigned: '#2563EB',
   'In Development': '#2563EB',
-  Testing: '#9333EA',
-  Completed: '#22C55E',
-  Blocked: '#EF4444',
-  'On Hold': '#6B7280',
+  Testing: '#2563EB',
+  Completed: '#15803D',
+  Blocked: '#D97706',
+  'On Hold': '#64748B',
 };
 
 const TIMELINE_STATUS_COLORS = {
-  [TIMELINE_STATUS.NOT_STARTED]: '#EAB308',
-  [TIMELINE_STATUS.IN_PROGRESS]: '#F97316',
-  [TIMELINE_STATUS.COMPLETED]: '#22C55E',
-  [TIMELINE_STATUS.DELAYED]: '#EF4444',
+  [TIMELINE_STATUS.NOT_STARTED]: '#64748B',
+  [TIMELINE_STATUS.IN_PROGRESS]: '#2563EB',
+  [TIMELINE_STATUS.COMPLETED]: '#15803D',
+  [TIMELINE_STATUS.DELAYED]: '#DC2626',
 };
 
 export const GROUP_BY_OPTIONS = [
@@ -372,14 +373,12 @@ export function buildGanttData(tasks, developers = [], options = {}) {
 
   // Epic mode keeps module nesting when modules exist
   if (groupBy === 'epic' && modules.length) {
-    workTasks.forEach((t) => {
-      const phase = (t.phase || 'General').trim() || 'General';
-      ensureGroup(phase);
-    });
-    modules.forEach((m) => {
-      const phase = (m.phase || 'General').trim() || 'General';
-      ensureGroup(phase);
-    });
+    const phaseNames = [
+      ...new Set(
+        [...workTasks, ...modules].map((t) => (t.phase || 'General').trim() || 'General')
+      ),
+    ].sort(comparePhaseNames);
+    phaseNames.forEach((phase) => ensureGroup(phase));
 
     modules.forEach((m) => {
       const phase = (m.phase || 'General').trim() || 'General';
@@ -433,10 +432,10 @@ export function buildGanttData(tasks, developers = [], options = {}) {
       ganttTasks.push(node);
     });
   } else {
-    workTasks.forEach((t) => {
-      const key = groupKeyForTask(t, groupBy, devById);
-      ensureGroup(key);
-    });
+    const groupKeys = [...new Set(workTasks.map((t) => groupKeyForTask(t, groupBy, devById)))].sort(
+      comparePhaseNames
+    );
+    groupKeys.forEach((key) => ensureGroup(key));
     if (!groupOrder.length) ensureGroup('General');
 
     workTasks.forEach((t) => {

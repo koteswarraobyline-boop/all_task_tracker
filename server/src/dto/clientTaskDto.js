@@ -34,6 +34,8 @@ function toClientTask(task, now) {
     isOverdue: schedule.isOverdue,
     publicStatusNote,
     updatedAt: plain.updatedAt || null,
+    commentCount: 0,
+    reviewLinkCount: 0,
   };
 }
 

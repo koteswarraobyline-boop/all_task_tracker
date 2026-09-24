@@ -7,7 +7,7 @@ import { tokens } from '../theme';
  */
 export default function PageContainer({
   children,
-  maxWidth = tokens.layout.maxWidth,
+  maxWidth = '100%',
   narrow = false,
   sx = {},
 }) {
@@ -15,10 +15,10 @@ export default function PageContainer({
     <Box
       sx={{
         width: '100%',
-        maxWidth: narrow ? 960 : maxWidth,
-        mx: 'auto',
-        px: { xs: 2, sm: 3, md: tokens.layout.contentPad }, // 16 / 24 / 32
-        py: { xs: 3, md: tokens.layout.contentPad },
+        maxWidth: narrow ? 960 : maxWidth === false || maxWidth === '100%' ? '100%' : maxWidth,
+        mx: maxWidth === false || maxWidth === '100%' || !maxWidth ? 0 : 'auto',
+        px: { xs: 1.5, sm: 2, md: 2 },
+        py: { xs: 1.5, md: 2 },
         boxSizing: 'border-box',
         minWidth: 0,
         ...sx,
@@ -38,7 +38,7 @@ export function PageHeader({ title, subtitle, actions, back, sx = {} }) {
         justifyContent: "space-between",
         alignItems: { xs: 'stretch', sm: 'center' },
         gap: 3,
-        mb: 5,
+        mb: 3,
         minWidth: 0,
         ...sx
       }}>
@@ -56,8 +56,8 @@ export function PageHeader({ title, subtitle, actions, back, sx = {} }) {
             variant="h1"
             component="h1"
             sx={{
-              fontSize: { xs: '1.75rem', md: '2.25rem' },
-              fontWeight: 700,
+              fontSize: { xs: '1.35rem', md: '1.5rem' },
+              fontWeight: 600,
               letterSpacing: 0,
               lineHeight: 1.5,
               mb: subtitle ? 1 : 0,
@@ -105,19 +105,31 @@ export function MetricCard({
   iconColor = '#4F46E5',
   trend,
   trendUp = true,
+  trendVariant,
   onClick,
   sx = {},
 }) {
+  const trendColor =
+    trendVariant === 'neutral'
+      ? 'text.secondary'
+      : trendVariant === 'warning'
+        ? 'warning.main'
+        : trendUp
+          ? 'success.main'
+          : 'error.main';
+
   return (
     <Card
       onClick={onClick}
       sx={{
         height: '100%',
         ...(onClick ? { cursor: 'pointer' } : {}),
-        '&:hover': {
-          transform: 'translateY(-3px)',
-          boxShadow: tokens.shadow.hover,
-        },
+        '&:hover': onClick
+          ? {
+              boxShadow: tokens.shadow.hover,
+              borderColor: (t) => (t.palette.mode === 'dark' ? 'divider' : tokens.colors.border),
+            }
+          : undefined,
         ...sx,
       }}
     >
@@ -132,8 +144,8 @@ export function MetricCard({
           }}>
           <Box
             sx={{
-              width: 48,
-              height: 48,
+              width: 36,
+              height: 36,
               borderRadius: `${tokens.radius.button}px`,
               bgcolor: (t) => (t.palette.mode === 'dark' ? 'action.hover' : tint),
               color: iconColor,
@@ -159,8 +171,8 @@ export function MetricCard({
         <Typography
           variant="h1"
           sx={{
-            fontSize: { xs: '1.75rem', md: '2rem' },
-            fontWeight: 700,
+            fontSize: { xs: '1.35rem', md: '1.5rem' },
+            fontWeight: 650,
             letterSpacing: 0,
             lineHeight: 1.3,
             mb: trend ? 1.5 : 0,
@@ -173,7 +185,7 @@ export function MetricCard({
             variant="caption"
             sx={{
               fontWeight: 600,
-              color: trendUp ? 'success.main' : 'error.main',
+              color: trendColor,
               lineHeight: 1.5,
               display: 'block',
             }}

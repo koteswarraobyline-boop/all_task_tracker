@@ -6,6 +6,9 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import listPlugin from '@fullcalendar/list';
 import { Calendar as PrimeCalendar } from 'primereact/calendar';
+import 'primereact/resources/themes/lara-light-blue/theme.css';
+import 'primereact/resources/primereact.min.css';
+import 'primeicons/primeicons.css';
 import {
   Box,
   Typography,
@@ -39,13 +42,13 @@ import { getTaskProgressPercent } from '../utils/taskProgress';
 
 const STATUS_COLORS = {
   Upcoming: '#64748B',
-  Assigned: '#3B82F6',
-  'In Development': '#4F46E5',
-  Testing: '#06B6D4',
-  Completed: '#22C55E',
-  Blocked: '#EF4444',
-  'On Hold': '#F59E0B',
-  'Code Review': '#06B6D4',
+  Assigned: '#2563EB',
+  'In Development': '#2563EB',
+  Testing: '#2563EB',
+  Completed: '#15803D',
+  Blocked: '#D97706',
+  'On Hold': '#64748B',
+  'Code Review': '#2563EB',
 };
 
 const ALL_STATUSES = [
@@ -303,10 +306,10 @@ export default function ProjectTaskCalendar() {
   return (
     <Box
       sx={{
-        px: { xs: 2, sm: 3, md: 4 },
-        py: { xs: 2.5, md: 3 },
-        maxWidth: 1680,
-        mx: 'auto',
+        px: { xs: 1.5, sm: 2, md: 2 },
+        py: { xs: 1.5, md: 2 },
+        maxWidth: '100%',
+        mx: 0,
         width: '100%',
         boxSizing: 'border-box',
       }}
@@ -339,7 +342,7 @@ export default function ProjectTaskCalendar() {
           <Box sx={{ minWidth: 0 }}>
             <Typography
               variant="h5"
-              sx={{ fontWeight: 800, lineHeight: 1.3, letterSpacing: '-0.02em', mb: 0.75 }}
+              sx={{ fontWeight: 650, lineHeight: 1.3, letterSpacing: '-0.02em', mb: 0.75 }}
             >
               {project?.name || 'Project'} · Calendar
             </Typography>
@@ -643,7 +646,7 @@ export default function ProjectTaskCalendar() {
             sx={{
               '& .fc': { fontFamily: 'inherit' },
               '& .fc-toolbar': { mb: '1rem !important', gap: '0.75rem' },
-              '& .fc-toolbar-title': { fontSize: '1.2rem', fontWeight: 800 },
+              '& .fc-toolbar-title': { fontSize: '1.05rem', fontWeight: 600 },
               '& .fc-button': {
                 textTransform: 'capitalize',
                 fontWeight: 700,

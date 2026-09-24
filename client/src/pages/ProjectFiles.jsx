@@ -4,7 +4,6 @@ import { Box, Typography, Button, Stack } from '@mui/material';
 import { FolderOpen as FilesIcon, ArrowBack as BackIcon } from '@mui/icons-material';
 import PageContainer from '../components/PageContainer';
 import EmptyState from '../components/EmptyState';
-import { ProjectNavTabs } from '../components/ProjectDashboard';
 import { useProjectId } from '../hooks/useProjectId';
 import { tokens } from '../theme';
 
@@ -13,7 +12,7 @@ export default function ProjectFiles() {
   const navigate = useNavigate();
 
   return (
-    <PageContainer maxWidth={tokens.layout.maxWidth}>
+    <PageContainer maxWidth="100%" sx={{ maxWidth: '100%', px: { xs: 1.5, sm: 2, md: 2 }, py: { xs: 1.5, md: 2 } }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
         <Button
           size="small"
@@ -24,13 +23,12 @@ export default function ProjectFiles() {
           Back to Overview
         </Button>
       </Stack>
-      <Typography variant="h1" sx={{ fontSize: '1.75rem', fontWeight: 800, mb: 0.5 }}>
+      <Typography variant="h1" sx={{ fontSize: '1.5rem', fontWeight: 650, mb: 0.5 }}>
         Project Files
       </Typography>
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
         Documents and attachments for this project.
       </Typography>
-      <ProjectNavTabs projectId={projectId} />
       <Box sx={{ py: 6, textAlign: 'center' }}>
         <EmptyState
           title="Files coming soon"

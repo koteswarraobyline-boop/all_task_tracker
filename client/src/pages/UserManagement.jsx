@@ -1,190 +1,238 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
+  Alert,
+  Avatar,
   Box,
-  Typography,
   Button,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Drawer,
+  FormControlLabel,
+  IconButton,
+  Link,
+  Menu,
+  MenuItem,
+  Paper,
+  Skeleton,
+  Snackbar,
+  Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
-  IconButton,
-  Tooltip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   TextField,
-  MenuItem,
-  Chip,
-  Stack,
-  Snackbar,
-  Alert,
-  FormControlLabel,
-  Switch,
-  Avatar,
-  Tabs,
-  Tab,
-  InputAdornment,
-  Menu,
-  Pagination,
-  Checkbox,
-  Divider,
-  Skeleton,
-  Collapse,
+  Typography,
 } from '@mui/material';
 import {
   Add as AddIcon,
+  AdminPanelSettings as AdminIcon,
+  ArrowDropDown as ArrowDropDownIcon,
+  CheckCircle as ActiveIcon,
+  ChevronRight as ChevronRightIcon,
   ContentCopy as CopyIcon,
   Delete as DeleteIcon,
-  Refresh as RefreshIcon,
+  Edit as EditIcon,
+  Email as EmailIcon,
+  FileDownload as ExportIcon,
+  Groups as UsersIcon,
   LinkOff as DisableIcon,
   Link as EnableIcon,
-  Search as SearchIcon,
-  FilterList as FilterIcon,
-  FileDownload as ExportIcon,
-  MoreVert as MoreIcon,
-  Visibility as ViewIcon,
-  Edit as EditIcon,
-  PersonAdd as InviteIcon,
-  Groups as UsersIcon,
-  CheckCircle as ActiveIcon,
-  AdminPanelSettings as AdminIcon,
-  Code as DevIcon,
-  Person as ClientIcon,
-  Clear as ClearIcon,
-  KeyboardCommandKey as CmdIcon,
-  Close as CloseIcon,
-  Dashboard as DashIcon,
-  Email as EmailIcon,
-  FolderOpen as ProjectsIcon,
-  ViewKanban as TasksIcon,
-  CalendarMonth as CalendarIcon,
-  Settings as SettingsIcon,
+  Lock as PendingIcon,
   LockReset as ResetIcon,
+  MoreVert as MoreIcon,
+  PersonOff as InactiveIcon,
+  Search as SearchIcon,
+  Visibility as ViewIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
-import PageContainer, { MetricCard } from '../components/PageContainer';
+import Can from '../components/Can';
 import EmptyState from '../components/EmptyState';
+import PageContainer, { PageHeader, MetricCard } from '../components/PageContainer';
+import PaginationBar from '../components/PaginationBar';
+import FilterDropdown from '../components/TaskBoard/FilterDropdown';
 import { tokens } from '../theme';
-import { initials, formatDate, formatDateTime } from '../utils/formatters';
+import { initials } from '../utils/formatters';
 import { openClientInviteEmail } from '../utils/clientInviteMail';
-
-const ROLE_SX = {
-  Administrator: { bgcolor: '#EDE9FE', color: '#5B21B6', border: '1px solid #DDD6FE' },
-  'Super Admin': { bgcolor: '#EDE9FE', color: '#5B21B6', border: '1px solid #DDD6FE' },
-  Admin: { bgcolor: '#DBEAFE', color: '#1D4ED8', border: '1px solid #BFDBFE' },
-  Developer: { bgcolor: '#FFEDD5', color: '#9A3412', border: '1px solid #FED7AA' },
-  Client: { bgcolor: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0' },
-};
-
-const STATUS_SX = {
-  Active: { color: '#15803D', dot: '#22C55E' },
-  Pending: { color: '#B45309', dot: '#F59E0B' },
-  Inactive: { color: '#64748B', dot: '#94A3B8' },
-  Suspended: { color: '#B91C1C', dot: '#EF4444' },
-};
-
-const MODULE_PERMS = [
-  { key: 'dashboard', label: 'Dashboard', desc: 'View project overview & KPIs', icon: <DashIcon sx={{ fontSize: 18 }} />, roles: ['Administrator', 'Developer'] },
-  { key: 'projects', label: 'Projects', desc: 'Create and manage projects', icon: <ProjectsIcon sx={{ fontSize: 18 }} />, roles: ['Administrator', 'Developer'] },
-  { key: 'tasks', label: 'Task Board', desc: 'View and update tasks', icon: <TasksIcon sx={{ fontSize: 18 }} />, roles: ['Administrator', 'Developer', 'Client'] },
-  { key: 'calendar', label: 'Calendar', desc: 'Schedule and deadlines', icon: <CalendarIcon sx={{ fontSize: 18 }} />, roles: ['Administrator', 'Developer', 'Client'] },
-  { key: 'developers', label: 'Developers', desc: 'Manage assignee directory', icon: <DevIcon sx={{ fontSize: 18 }} />, roles: ['Administrator'] },
-  { key: 'users', label: 'Users', desc: 'Invite and manage users', icon: <UsersIcon sx={{ fontSize: 18 }} />, roles: ['Administrator'] },
-  { key: 'settings', label: 'Settings', desc: 'Workspace configuration', icon: <SettingsIcon sx={{ fontSize: 18 }} />, roles: ['Administrator'] },
-];
-
-const TABS = [
-  { id: 'all', label: 'All Users' },
-  { id: 'Administrator', label: 'Administrators' },
-  { id: 'Developer', label: 'Developers' },
-  { id: 'Client', label: 'Clients' },
-  { id: 'inactive', label: 'Inactive Users' },
-];
-
-const AVATAR_COLORS = ['#6366F1', '#2563EB', '#059669', '#EA580C', '#DB2777', '#0891B2', '#7C3AED'];
-
-const glassSx = {
-  bgcolor: 'rgba(255,255,255,0.85)',
-  backdropFilter: 'blur(12px)',
-  border: '1px solid #E2E8F0',
-  boxShadow: '0 1px 3px rgba(15,23,42,0.05)',
-  borderRadius: `${tokens.radius.card}px`,
-};
-
-function roleColor(id) {
-  return AVATAR_COLORS[Number(id) % AVATAR_COLORS.length];
-}
-
-function permissionChipsForRole(role) {
-  return MODULE_PERMS.filter((m) => m.roles.includes(role)).map((m) => m.label);
-}
-
-function exportUsersCsv(rows) {
-  const headers = ['Name', 'Email', 'Role', 'Company', 'Status', 'Last Active', 'Created'];
-  const lines = rows.map((u) =>
-    [u.name, u.email, u.role, u.department, u.status, u.lastActive || '', u.createdAt || '']
-      .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`)
-      .join(',')
-  );
-  const blob = new Blob([[headers.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+import { resolveClientShareUrl } from '../utils/shareUrl';
+import {
+  USER_ROLES,
+  USER_STATUSES,
+  buildUsersFromSources,
+  computeUserKpis,
+  exportUsersCsv,
+  filterUsers,
+  formatUserLastActive,
+  getRoleBadgeStyle,
+  getStatusStyle,
+  getUserProjectCount,
+  uniqueSorted,
+} from '../utils/userManagementHelpers';
 
 function StatusBadge({ status }) {
-  const sx = STATUS_SX[status] || STATUS_SX.Inactive;
+  const sx = getStatusStyle(status);
   return (
-    <Stack
-      direction="row"
-      sx={{
-        alignItems: "center",
-        gap: 0.75
-      }}>
+    <Stack direction="row" alignItems="center" spacing={0.75}>
       <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: sx.dot, flexShrink: 0 }} />
-      <Typography sx={{ fontSize: '0.8125rem', fontWeight: 650, color: sx.color }}>{status}</Typography>
+      <Chip
+        label={status}
+        size="small"
+        sx={{
+          bgcolor: sx.bgcolor,
+          color: sx.color,
+          fontWeight: 600,
+          fontSize: '0.75rem',
+          borderRadius: `${tokens.radius.badge}px`,
+        }}
+      />
     </Stack>
   );
 }
 
 function RoleBadge({ role }) {
-  const sx = ROLE_SX[role] || ROLE_SX.Client;
+  const sx = getRoleBadgeStyle(role);
   return (
     <Chip
-      size="small"
       label={role}
-      sx={{ height: 26, fontWeight: 750, fontSize: '0.7rem', borderRadius: 999, ...sx }}
+      size="small"
+      sx={{
+        height: 26,
+        fontWeight: 600,
+        fontSize: '0.75rem',
+        borderRadius: 999,
+        bgcolor: sx.bgcolor,
+        color: sx.color,
+      }}
     />
   );
 }
 
+function UserDetailsDrawer({ open, user, onClose, onEditClient, onCopy, onEmail, onToggle, onDelete, onViewDeveloper }) {
+  if (!user) return null;
+
+  return (
+    <Drawer anchor="right" open={open} onClose={onClose} PaperProps={{ sx: { width: { xs: '100%', sm: 420 } } }}>
+      <Box sx={{ p: 3 }}>
+        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
+          <Avatar sx={{ bgcolor: user.color, width: 56, height: 56, fontWeight: 700 }}>
+            {initials(user.name)}
+          </Avatar>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: '1.125rem' }}>{user.name}</Typography>
+            <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>{user.email}</Typography>
+          </Box>
+        </Stack>
+
+        <Stack direction="row" spacing={1} sx={{ mb: 3, flexWrap: 'wrap', gap: 1 }}>
+          <RoleBadge role={user.role} />
+          <StatusBadge status={user.status} />
+        </Stack>
+
+        <Stack spacing={2} sx={{ mb: 3 }}>
+          {[
+            ['Team', user.team || '—'],
+            ['Projects', getUserProjectCount(user)],
+            ['Last Active', formatUserLastActive(user)],
+            ...(user.projectName ? [['Project', user.projectName]] : []),
+          ].map(([label, value]) => (
+            <Box key={label}>
+              <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: 'text.secondary', mb: 0.25 }}>{label}</Typography>
+              <Typography sx={{ fontWeight: 600 }}>{value}</Typography>
+            </Box>
+          ))}
+        </Stack>
+
+        <Stack spacing={1}>
+          {user.source === 'developer' ? (
+            <Button variant="contained" fullWidth onClick={() => onViewDeveloper(user)}>
+              View Developer Profile
+            </Button>
+          ) : null}
+          {user.source === 'client' ? (
+            <>
+              <Button variant="contained" fullWidth startIcon={<EditIcon />} onClick={() => onEditClient(user)}>
+                Edit User
+              </Button>
+              <Button variant="outlined" fullWidth startIcon={<CopyIcon />} onClick={() => onCopy(resolveClientShareUrl(user))}>
+                Copy Share Link
+              </Button>
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<EmailIcon />}
+                onClick={() => onEmail(user)}
+                disabled={!user.email || user.email === '—'}
+              >
+                Resend Invitation
+              </Button>
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={user.status === 'Active' ? <DisableIcon /> : <EnableIcon />}
+                onClick={() => onToggle(user)}
+              >
+                {user.status === 'Active' ? 'Deactivate' : 'Reactivate'}
+              </Button>
+            </>
+          ) : null}
+          {user.source !== 'admin' ? (
+            <Button variant="outlined" color="error" fullWidth startIcon={<DeleteIcon />} onClick={() => onDelete(user)}>
+              Delete User
+            </Button>
+          ) : null}
+        </Stack>
+      </Box>
+    </Drawer>
+  );
+}
+
+function UsersTableSkeleton() {
+  return (
+    <Box sx={{ p: 2 }}>
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <Skeleton key={i} variant="rounded" height={56} sx={{ mb: 1, borderRadius: `${tokens.radius.button}px` }} />
+      ))}
+    </Box>
+  );
+}
+
 export default function UserManagement() {
+  const navigate = useNavigate();
   const [developers, setDevelopers] = useState([]);
   const [clients, setClients] = useState([]);
   const [projects, setProjects] = useState([]);
   const [admin, setAdmin] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [exporting, setExporting] = useState(false);
   const [alert, setAlert] = useState({ open: false, message: '', severity: 'success' });
 
-  const [tab, setTab] = useState('all');
-  const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [deptFilter, setDeptFilter] = useState('all');
-  const [showMoreFilters, setShowMoreFilters] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [detailsUser, setDetailsUser] = useState(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuUser, setMenuUser] = useState(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [addMenuAnchor, setAddMenuAnchor] = useState(null);
+  const [bulkMenuAnchor, setBulkMenuAnchor] = useState(null);
+  const [bulkConfirm, setBulkConfirm] = useState(null);
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -213,6 +261,7 @@ export default function UserManagement() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError('');
       const [devs, accessRecords, projectList, me] = await Promise.all([
         api.getDevelopers().catch(() => []),
         api.listClientAccess().catch(() => []),
@@ -225,7 +274,8 @@ export default function UserManagement() {
       setAdmin(me);
     } catch (error) {
       console.error(error);
-      showAlert('Failed to load users', 'error');
+      setLoadError('Unable to load users.');
+      showAlert('Unable to load users.', 'error');
     } finally {
       setLoading(false);
     }
@@ -236,156 +286,107 @@ export default function UserManagement() {
   }, [loadData]);
 
   useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        document.getElementById('users-search')?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
-  const users = useMemo(() => {
-    const rows = [];
+  const users = useMemo(
+    () => buildUsersFromSources({ admin, developers, clients, projectsCount: projects.length }),
+    [admin, developers, clients, projects.length]
+  );
 
-    if (admin) {
-      rows.push({
-        id: `admin-${admin.id}`,
-        source: 'admin',
-        rawId: admin.id,
-        name: admin.username
-          ? admin.username.charAt(0).toUpperCase() + admin.username.slice(1)
-          : 'Administrator',
-        email: admin.email || '—',
-        role: 'Administrator',
-        department: '—',
-        position: 'Administrator',
-        phone: '—',
-        status: 'Active',
-        lastActive: null,
-        createdAt: null,
-        color: '#6366F1',
-        permissions: permissionChipsForRole('Administrator'),
-        activity: [],
-      });
-    }
+  const kpis = useMemo(() => computeUserKpis(users), [users]);
 
-    developers.forEach((d) => {
-      rows.push({
-        id: `dev-${d.id}`,
-        source: 'developer',
-        rawId: d.id,
-        name: d.name || 'Developer',
-        email: d.email || '—',
-        role: 'Developer',
-        department: '—',
-        position: 'Developer',
-        phone: '—',
-        status: 'Active',
-        lastActive: d.updatedAt,
-        createdAt: d.createdAt,
-        color: d.color || roleColor(d.id),
-        permissions: permissionChipsForRole('Developer'),
-        taskStats: {
-          total: d.totalTasks || 0,
-          completed: d.completedTasks || 0,
-        },
-        activity: [],
-        raw: d,
-      });
-    });
-
-    clients.forEach((c) => {
-      const status =
-        c.status === 'active' ? 'Active' : c.status === 'disabled' ? 'Inactive' : 'Pending';
-      rows.push({
-        id: `client-${c.id}`,
-        source: 'client',
-        rawId: c.id,
-        name: c.clientName || 'Client',
-        email: c.email || '—',
-        role: 'Client',
-        department: c.company || '—',
-        position: 'Client',
-        phone: '—',
-        status,
-        lastActive: c.lastOpenedAt,
-        createdAt: c.createdAt,
-        color: roleColor(c.id + 3),
-        permissions: permissionChipsForRole('Client'),
-        projectName: c.project?.name || `Project #${c.projectId}`,
-        shareUrl: c.shareUrl,
-        passwordProtected: c.passwordProtected,
-        activity: [
-          ...(c.lastOpenedAt
-            ? [{ text: 'Opened shared project', when: formatDateTime(c.lastOpenedAt) }]
-            : []),
-          { text: `Linked to ${c.project?.name || 'project'}`, when: formatDate(c.createdAt) },
-        ],
-        raw: c,
-      });
-    });
-
-    return rows;
-  }, [admin, developers, clients]);
-
-  const departments = useMemo(
-    () => [...new Set(users.map((u) => u.department).filter((d) => d && d !== '—'))].sort(),
+  const teamOptions = useMemo(
+    () => [{ value: '', label: 'All Teams' }, ...uniqueSorted(users.map((u) => u.team).filter((t) => t && t !== '—')).map((t) => ({ value: t, label: t }))],
     [users]
   );
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return users.filter((u) => {
-      if (tab === 'inactive') {
-        if (u.status === 'Active') return false;
-      } else if (tab !== 'all' && u.role !== tab) {
-        return false;
-      }
-      if (roleFilter !== 'all' && u.role !== roleFilter) return false;
-      if (statusFilter !== 'all' && u.status !== statusFilter) return false;
-      if (deptFilter !== 'all' && u.department !== deptFilter) return false;
-      if (q) {
-        const hay = [u.name, u.email, u.role, u.department, u.position].join(' ').toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [users, tab, search, roleFilter, statusFilter, deptFilter]);
+  const roleOptions = useMemo(() => {
+    const customRoles = uniqueSorted(users.map((u) => u.role).filter((r) => !USER_ROLES.includes(r)));
+    return [
+      { value: '', label: 'All Roles' },
+      ...USER_ROLES.map((r) => ({ value: r, label: r })),
+      ...customRoles.map((r) => ({ value: r, label: r })),
+    ];
+  }, [users]);
+
+  const statusOptions = useMemo(
+    () => [{ value: '', label: 'All Status' }, ...USER_STATUSES.map((s) => ({ value: s, label: s }))],
+    []
+  );
+
+  const projectOptions = useMemo(
+    () => [{ value: '', label: 'All Projects' }, ...projects.map((p) => ({ value: String(p.id), label: p.name }))],
+    [projects]
+  );
+
+  const filteredUsers = useMemo(
+    () =>
+      filterUsers(users, {
+        search: debouncedSearch,
+        role: roleFilter,
+        status: statusFilter,
+        team: teamFilter,
+        project: projectFilter,
+      }),
+    [users, debouncedSearch, roleFilter, statusFilter, teamFilter, projectFilter]
+  );
 
   useEffect(() => {
     setPage(1);
-  }, [tab, search, roleFilter, statusFilter, deptFilter]);
+    setSelectedIds(new Set());
+  }, [debouncedSearch, roleFilter, statusFilter, teamFilter, projectFilter]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
-  const paged = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-  const from = filtered.length === 0 ? 0 : (page - 1) * rowsPerPage + 1;
-  const to = Math.min(page * rowsPerPage, filtered.length);
+  const pageCount = Math.max(1, Math.ceil(filteredUsers.length / rowsPerPage));
+  const pagedUsers = filteredUsers.slice((page - 1) * rowsPerPage, page * rowsPerPage);
 
-  const selected = users.find((u) => u.id === selectedId) || null;
+  const hasActiveFilters = Boolean(debouncedSearch || roleFilter || statusFilter || teamFilter || projectFilter);
 
-  useEffect(() => {
-    if (selectedId && !users.some((u) => u.id === selectedId)) {
-      setSelectedId(null);
+  const clearFilters = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setRoleFilter('');
+    setStatusFilter('');
+    setTeamFilter('');
+    setProjectFilter('');
+  };
+
+  const selectedUsers = useMemo(
+    () => users.filter((u) => selectedIds.has(u.id)),
+    [users, selectedIds]
+  );
+
+  const toggleRow = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const togglePageAll = () => {
+    const pageIds = pagedUsers.map((u) => u.id);
+    const allSelected = pageIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      exportUsersCsv(filteredUsers);
+      showAlert(`Exported ${filteredUsers.length} users`);
+    } catch {
+      showAlert('Export failed', 'error');
+    } finally {
+      setExporting(false);
     }
-  }, [users, selectedId]);
-
-  const totals = useMemo(() => {
-    const total = users.length;
-    const active = users.filter((u) => u.status === 'Active').length;
-    const admins = users.filter((u) => u.role === 'Administrator').length;
-    const devs = users.filter((u) => u.role === 'Developer').length;
-    const clientCount = users.filter((u) => u.role === 'Client').length;
-    return { total, active, admins, devs, clientCount };
-  }, [users]);
-
-  const resetFilters = () => {
-    setSearch('');
-    setRoleFilter('all');
-    setStatusFilter('all');
-    setDeptFilter('all');
-    setTab('all');
   };
 
   const handleCreateClient = async (e) => {
@@ -398,30 +399,27 @@ export default function UserManagement() {
         email: clientForm.email.trim() || null,
         projectId: parseInt(clientForm.projectId, 10),
         expiresAt: null,
-        password:
-          clientForm.passwordProtected && clientForm.password ? clientForm.password : undefined,
+        password: clientForm.passwordProtected && clientForm.password ? clientForm.password : undefined,
       });
-      const projectLabel =
-        projects.find((p) => String(p.id) === String(clientForm.projectId))?.name || 'project';
+      const projectLabel = projects.find((p) => String(p.id) === String(clientForm.projectId))?.name || 'project';
       const to = clientForm.email.trim();
-      if (to && created?.shareUrl) {
+      if (to && created?.token) {
         openClientInviteEmail({
           to,
           clientName: clientForm.clientName.trim(),
           projectName: projectLabel,
-          shareUrl: created.shareUrl,
+          shareUrl: resolveClientShareUrl(created),
           passwordProtected: Boolean(clientForm.passwordProtected),
         });
-        showAlert('Client link created — opening email to send invite…');
+        showAlert('User invited — opening email to send invite…');
       } else {
-        showAlert('Client link created — copy it from the Clients tab or user details');
+        showAlert('Client link created');
       }
       setInviteOpen(false);
       setClientForm(emptyClientForm);
-      setTab('Client');
       loadData();
     } catch (error) {
-      showAlert(error.response?.data?.error || 'Failed to create client link', 'error');
+      showAlert(error.response?.data?.error || 'Failed to create user', 'error');
     } finally {
       setSaving(false);
     }
@@ -455,23 +453,16 @@ export default function UserManagement() {
         clientName: clientForm.clientName.trim(),
         company: clientForm.company.trim() || null,
         email: clientForm.email.trim() || null,
-        // leave blank = keep existing password; empty string when toggle off = remove password
-        password: clientForm.passwordProtected
-          ? (clientForm.password.trim() || undefined)
-          : '',
+        password: clientForm.passwordProtected ? (clientForm.password.trim() || undefined) : '',
       });
-      showAlert(
-        clientForm.passwordProtected && clientForm.password.trim()
-          ? 'Client updated — password changed'
-          : 'Client updated'
-      );
+      showAlert('User updated');
       setEditOpen(false);
       setEditingClientId(null);
       setEditHadPassword(false);
       setClientForm(emptyClientForm);
       loadData();
     } catch (error) {
-      showAlert(error.response?.data?.error || 'Failed to update client', 'error');
+      showAlert(error.response?.data?.error || 'Failed to update user', 'error');
     } finally {
       setSaving(false);
     }
@@ -509,22 +500,22 @@ export default function UserManagement() {
   const handleEmailClient = (user) => {
     const to = user?.email && user.email !== '—' ? String(user.email).trim() : '';
     if (!to) {
-      showAlert('This client has no email on file', 'warning');
+      showAlert('This user has no email on file', 'warning');
       return;
     }
-    if (!user?.shareUrl) {
-      showAlert('No share link available for this client', 'warning');
+    const shareUrl = resolveClientShareUrl(user);
+    if (!shareUrl) {
+      showAlert('No share link available', 'warning');
       return;
     }
-    const opened = openClientInviteEmail({
+    openClientInviteEmail({
       to,
       clientName: user.name,
-      projectName: user.projectName || user.department,
-      shareUrl: user.shareUrl,
+      projectName: user.projectName || user.team,
+      shareUrl,
       passwordProtected: Boolean(user.passwordProtected),
     });
-    if (opened) showAlert('Opening your email app…');
-    else showAlert('Could not open email', 'error');
+    showAlert('Opening your email app…');
   };
 
   const handleToggleClient = async (user) => {
@@ -532,7 +523,7 @@ export default function UserManagement() {
     try {
       const next = user.raw.status === 'active' ? 'disabled' : 'active';
       await api.updateClientAccess(user.rawId, { status: next });
-      showAlert(next === 'active' ? 'User enabled' : 'User disabled');
+      showAlert(next === 'active' ? 'User reactivated' : 'User deactivated');
       loadData();
     } catch (error) {
       showAlert(error.response?.data?.error || 'Failed to update status', 'error');
@@ -543,8 +534,9 @@ export default function UserManagement() {
     if (user.source !== 'client') return;
     try {
       const updated = await api.regenerateClientAccess(user.rawId);
-      showAlert(`New link ready`);
-      if (updated?.shareUrl) handleCopy(updated.shareUrl);
+      showAlert('Invitation link regenerated');
+      const url = resolveClientShareUrl(updated);
+      if (url) handleCopy(url);
       loadData();
     } catch (error) {
       showAlert(error.response?.data?.error || 'Failed to regenerate link', 'error');
@@ -556,7 +548,7 @@ export default function UserManagement() {
     try {
       if (deleteTarget.source === 'client') {
         await api.deleteClientAccess(deleteTarget.rawId);
-        showAlert('Client access deleted');
+        showAlert('User deleted');
       } else if (deleteTarget.source === 'developer') {
         await api.deleteDeveloper(deleteTarget.rawId);
         showAlert('Developer removed');
@@ -564,989 +556,427 @@ export default function UserManagement() {
         showAlert('Administrators cannot be deleted from here', 'warning');
       }
       setDeleteTarget(null);
-      setSelectedId(null);
+      setDetailsOpen(false);
+      setSelectedIds(new Set());
       loadData();
     } catch (error) {
       showAlert(error.response?.data?.error || 'Failed to delete', 'error');
     }
   };
 
-  const filterSx = {
-    minWidth: 140,
-    '& .MuiOutlinedInput-root': {
-      height: 40,
-      bgcolor: '#fff',
-      borderRadius: 2,
-      fontSize: '0.8125rem',
-      fontWeight: 600,
-    },
+  const runBulkAction = async (action) => {
+    setBulkMenuAnchor(null);
+    const targets = selectedUsers.filter((u) => u.source !== 'admin');
+    if (!targets.length) {
+      showAlert('No eligible users selected', 'warning');
+      return;
+    }
+    setBulkConfirm({ action, count: targets.length, targets });
   };
 
+  const confirmBulkAction = async () => {
+    if (!bulkConfirm) return;
+    setBulkWorking(true);
+    try {
+      const { action, targets } = bulkConfirm;
+      if (action === 'activate' || action === 'deactivate') {
+        const clients = targets.filter((u) => u.source === 'client');
+        await Promise.all(
+          clients.map((u) =>
+            api.updateClientAccess(u.rawId, { status: action === 'activate' ? 'active' : 'disabled' })
+          )
+        );
+        showAlert(`${clients.length} user(s) ${action === 'activate' ? 'activated' : 'deactivated'}`);
+      } else if (action === 'delete') {
+        await Promise.all(
+          targets.map((u) =>
+            u.source === 'client'
+              ? api.deleteClientAccess(u.rawId)
+              : api.deleteDeveloper(u.rawId)
+          )
+        );
+        showAlert(`${targets.length} user(s) deleted`);
+      }
+      setBulkConfirm(null);
+      setSelectedIds(new Set());
+      loadData();
+    } catch (error) {
+      showAlert(error.response?.data?.error || 'Bulk action failed', 'error');
+    } finally {
+      setBulkWorking(false);
+    }
+  };
+
+  const openUserDetails = (user) => {
+    setDetailsUser(user);
+    setDetailsOpen(true);
+  };
+
+  const kpiCards = [
+    { label: 'Total Users', value: kpis.total, trend: 'All system users', icon: <UsersIcon />, tint: '#EEF2FF', iconColor: '#4F46E5' },
+    { label: 'Active Users', value: kpis.active, trend: 'Currently active', icon: <ActiveIcon />, tint: '#ECFDF5', iconColor: '#16A34A' },
+    { label: 'Inactive Users', value: kpis.inactive, trend: 'Disabled accounts', icon: <InactiveIcon />, tint: '#FFF7ED', iconColor: '#EA580C' },
+    { label: 'Admins', value: kpis.admins, trend: 'System administrators', icon: <AdminIcon />, tint: '#EFF6FF', iconColor: '#2563EB' },
+    { label: 'Pending Invites', value: kpis.pending, trend: 'Invitations sent', icon: <PendingIcon />, tint: '#F5F3FF', iconColor: '#7C3AED' },
+  ];
+
   return (
-    <PageContainer maxWidth={1800}>
-      {/* Breadcrumb + header actions */}
-      <Stack
-        direction={{ xs: 'column', lg: 'row' }}
-        sx={{
-          justifyContent: "space-between",
-          alignItems: { xs: 'stretch', lg: 'flex-start' },
-          gap: 2,
-          mb: 1
-        }}>
-        <Box>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600, mb: 1 }}>
-            Settings / User Management
-          </Typography>
-          <Typography
-            component="h1"
-            sx={{
-              fontSize: { xs: '1.75rem', md: '2.15rem' },
-              fontWeight: 800,
-              letterSpacing: '-0.025em',
-              lineHeight: 1.2,
-              mb: 0.75,
-            }}
-          >
-            User Management
-          </Typography>
-          <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', lineHeight: 1.5 }}>
-            Manage users, roles and permissions across your workspace.
-          </Typography>
-        </Box>
-        <Stack
-          direction="row"
-          useFlexGap
-          sx={{
-            gap: 1.25,
-            flexWrap: "wrap"
-          }}>
-          <Button
-            variant="contained"
-            startIcon={<InviteIcon />}
-            onClick={() => {
-              setClientForm(emptyClientForm);
-              setInviteOpen(true);
-            }}
-            sx={{
-              height: 44,
-              background: 'linear-gradient(135deg, #4F46E5 0%, #2563EB 100%)',
-              boxShadow: '0 8px 20px rgba(37,99,235,0.3)',
-            }}
-          >
-            Invite User
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={() => setAddDevOpen(true)}
-            sx={{ bgcolor: '#fff', height: 44 }}
-          >
-            Add Developer
-          </Button>
-        </Stack>
+    <PageContainer maxWidth="100%">
+      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 2, flexWrap: 'wrap', gap: 0.5 }}>
+        <Link component={RouterLink} to="/dashboard" underline="hover" color="text.secondary" sx={{ fontSize: '0.875rem', fontWeight: 500 }}>
+          Dashboard
+        </Link>
+        <ChevronRightIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+        <Typography sx={{ fontSize: '0.875rem', fontWeight: 600 }}>User Management</Typography>
       </Stack>
-      {/* KPI cards */}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            sm: 'repeat(2, 1fr)',
-            md: 'repeat(3, 1fr)',
-            xl: 'repeat(5, 1fr)',
-          },
-          gap: 2.5,
-          my: 4,
-        }}
-      >
-        <MetricCard label="Total Users" value={totals.total} icon={<UsersIcon />} tint="#EEF2FF" iconColor="#6366F1" />
-        <MetricCard label="Active Users" value={totals.active} icon={<ActiveIcon />} tint="#ECFDF5" iconColor="#059669" />
-        <MetricCard label="Administrators" value={totals.admins} icon={<AdminIcon />} tint="#F5F3FF" iconColor="#7C3AED" />
-        <MetricCard label="Developers" value={totals.devs} icon={<DevIcon />} tint="#FFF7ED" iconColor="#EA580C" />
-        <MetricCard label="Clients" value={totals.clientCount} icon={<ClientIcon />} tint="#F8FAFC" iconColor="#64748B" />
-      </Box>
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            xl: selected && panelOpen ? 'minmax(0, 1fr) 340px' : '1fr',
-          },
-          gap: 3,
-          alignItems: 'start',
-        }}
-      >
-        {/* Main table card */}
-        <Paper elevation={0} sx={{ ...glassSx, overflow: 'hidden' }}>
-          <Tabs
-            value={tab}
-            onChange={(_e, v) => setTab(v)}
-            variant="scrollable"
-            scrollButtons="auto"
-            sx={{
-              px: 2,
-              borderBottom: '1px solid',
-              borderColor: 'divider',
-              minHeight: 48,
-              '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 48, fontSize: '0.875rem' },
-            }}
-          >
-            {TABS.map((t) => (
-              <Tab key={t.id} value={t.id} label={t.label} />
-            ))}
-          </Tabs>
 
-          {/* Toolbar */}
-          <Stack
-            direction={{ xs: 'column', lg: 'row' }}
-            useFlexGap
-            sx={{
-              gap: 1.5,
-              alignItems: { xs: 'stretch', lg: 'center' },
-              flexWrap: "wrap",
-              p: 2,
-              borderBottom: '1px solid',
-              borderColor: 'divider'
-            }}>
-            <TextField
-              id="users-search"
-              size="small"
-              placeholder="Search users by name, email or role…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ flex: 1, minWidth: { xs: '100%', md: 260 }, '& .MuiOutlinedInput-root': { height: 40, bgcolor: '#F8FAFC', borderRadius: 2 } }}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                    </InputAdornment>
-                  ),
-                  endAdornment: search ? (
-                    <InputAdornment position="end">
-                      <IconButton size="small" aria-label="Clear search" onClick={() => setSearch('')}>
-                        <ClearIcon fontSize="small" />
-                      </IconButton>
-                    </InputAdornment>
-                  ) : (
-                    <InputAdornment position="end">
-                      <Chip size="small" icon={<CmdIcon sx={{ fontSize: '14px !important' }} />} label="K" sx={{ height: 22, fontSize: '0.65rem', fontWeight: 700 }} />
-                    </InputAdornment>
-                  ),
-                }
-              }}
-            />
-
-            <TextField select size="small" label="Role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} sx={filterSx}>
-              <MenuItem value="all">All Roles</MenuItem>
-              {['Administrator', 'Developer', 'Client'].map((r) => (
-                <MenuItem key={r} value={r}>{r}</MenuItem>
-              ))}
-            </TextField>
-
-            <TextField select size="small" label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} sx={filterSx}>
-              <MenuItem value="all">All Status</MenuItem>
-              {['Active', 'Pending', 'Inactive'].map((s) => (
-                <MenuItem key={s} value={s}>{s}</MenuItem>
-              ))}
-            </TextField>
-
+      <PageHeader
+        title="User Management"
+        subtitle="Manage users, roles, permissions and access across the system."
+        actions={
+          <Stack direction="row" spacing={1.5} flexWrap="wrap">
             <Button
-              size="small"
-              startIcon={<FilterIcon />}
-              onClick={() => setShowMoreFilters((v) => !v)}
-              variant={showMoreFilters ? 'contained' : 'outlined'}
-              sx={{ height: 40, bgcolor: showMoreFilters ? undefined : '#fff' }}
+              variant="outlined"
+              startIcon={exporting ? <CircularProgress size={16} /> : <ExportIcon />}
+              onClick={handleExport}
+              disabled={exporting || filteredUsers.length === 0}
+              sx={{ textTransform: 'none', borderRadius: `${tokens.radius.button}px`, fontWeight: 600 }}
             >
-              More Filters
+              Export
             </Button>
-
-            <Tooltip title="Refresh">
-              <IconButton onClick={loadData} aria-label="Refresh users" sx={{ border: '1px solid', borderColor: 'divider', bgcolor: '#fff', width: 40, height: 40 }}>
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Export CSV">
-              <IconButton
-                onClick={() => {
-                  exportUsersCsv(filtered);
-                  showAlert(`Exported ${filtered.length} users`);
-                }}
-                aria-label="Export users"
-                sx={{ border: '1px solid', borderColor: 'divider', bgcolor: '#fff', width: 40, height: 40 }}
+            <Can permission="users.manage">
+              <Button
+                variant="outlined"
+                endIcon={<ArrowDropDownIcon />}
+                onClick={(e) => setBulkMenuAnchor(e.currentTarget)}
+                disabled={selectedIds.size === 0}
+                sx={{ textTransform: 'none', borderRadius: `${tokens.radius.button}px`, fontWeight: 600 }}
               >
-                <ExportIcon />
-              </IconButton>
-            </Tooltip>
+                Bulk Actions{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                endIcon={<ArrowDropDownIcon />}
+                onClick={(e) => setAddMenuAnchor(e.currentTarget)}
+                sx={{ textTransform: 'none', borderRadius: `${tokens.radius.button}px`, fontWeight: 600 }}
+              >
+                Add User
+              </Button>
+            </Can>
           </Stack>
+        }
+      />
 
-          <Collapse in={showMoreFilters}>
-            <Stack
-              direction="row"
-              useFlexGap
-              sx={{
-                gap: 1.5,
-                flexWrap: "wrap",
-                px: 2,
-                pb: 2
-              }}>
-              <TextField select size="small" label="Company" value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} sx={filterSx}>
-                <MenuItem value="all">All companies</MenuItem>
-                {departments.map((d) => (
-                  <MenuItem key={d} value={d}>{d}</MenuItem>
-                ))}
-              </TextField>
-              {(roleFilter !== 'all' || statusFilter !== 'all' || deptFilter !== 'all' || search || tab !== 'all') && (
-                <Button size="small" startIcon={<ClearIcon />} onClick={resetFilters}>
-                  Clear filters
-                </Button>
-              )}
-            </Stack>
-          </Collapse>
-
-          {loading ? (
-            <Box sx={{ p: 3 }}>
-              {[1, 2, 3, 4, 5].map((i) => (
-                <Skeleton key={i} variant="rounded" height={56} sx={{ mb: 1.5, borderRadius: 2 }} />
-              ))}
-            </Box>
-          ) : users.length === 0 ? (
-            <Box sx={{ p: 4 }}>
-              <EmptyState
-                title="No users yet"
-                description="Invite a client or add a developer to start building your workspace roster."
-                actionText="Invite User"
-                onActionClick={() => {
-                  setClientForm(emptyClientForm);
-                  setInviteOpen(true);
+      {loading ? (
+        <>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)', md: 'repeat(3,1fr)', lg: 'repeat(5,1fr)' }, gap: 2, mb: 3 }}>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} variant="rounded" height={130} sx={{ borderRadius: `${tokens.radius.card}px` }} />
+            ))}
+          </Box>
+          <UsersTableSkeleton />
+        </>
+      ) : loadError ? (
+        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: `${tokens.radius.card}px` }}>
+          <Typography sx={{ mb: 2, fontWeight: 600 }}>{loadError}</Typography>
+          <Button variant="contained" onClick={loadData}>Try Again</Button>
+        </Paper>
+      ) : (
+        <>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)', md: 'repeat(3,1fr)', lg: 'repeat(5,1fr)' }, gap: 2, mb: 3 }}>
+            {kpiCards.map((card) => (
+              <MetricCard
+                key={card.label}
+                {...card}
+                trendVariant="neutral"
+                sx={{
+                  minHeight: 132,
+                  '&:hover': { transform: 'none', boxShadow: tokens.shadow.card },
+                  '& .MuiCardContent-root': { p: 2.5, '&:last-child': { pb: 2.5 } },
                 }}
-                actionPermission="users.manage"
-                actionIcon={<InviteIcon />}
               />
-            </Box>
-          ) : filtered.length === 0 ? (
-            <Box sx={{ p: 6, textAlign: 'center' }}>
-              <Typography sx={{ fontWeight: 750, mb: 1 }}>No matching users</Typography>
-              <Typography sx={{ color: 'text.secondary', mb: 2 }}>Try adjusting search or filters.</Typography>
-              <Button variant="outlined" onClick={resetFilters}>Clear filters</Button>
-            </Box>
+            ))}
+          </Box>
+
+          <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, mb: 2, borderRadius: `${tokens.radius.card}px`, borderColor: tokens.colors.border }}>
+            <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', lg: 'center' }}>
+              <TextField
+                size="small"
+                placeholder="Search by name, email or role..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                InputProps={{ startAdornment: <SearchIcon sx={{ color: 'text.secondary', mr: 1, fontSize: 20 }} /> }}
+                sx={{ flex: 1, minWidth: 200, '& .MuiOutlinedInput-root': { borderRadius: `${tokens.radius.input}px` } }}
+                aria-label="Search users"
+              />
+              <Stack direction="row" flexWrap="wrap" gap={1} alignItems="center">
+                <FilterDropdown label="All Roles" options={roleOptions} value={roleFilter} onChange={setRoleFilter} minWidth={130} />
+                <FilterDropdown label="All Status" options={statusOptions} value={statusFilter} onChange={setStatusFilter} minWidth={130} />
+                <FilterDropdown label="All Teams" options={teamOptions} value={teamFilter} onChange={setTeamFilter} minWidth={130} />
+                <FilterDropdown label="All Projects" options={projectOptions} value={projectFilter} onChange={setProjectFilter} minWidth={140} searchable />
+                {hasActiveFilters ? (
+                  <Button size="small" onClick={clearFilters} sx={{ textTransform: 'none', fontWeight: 600, color: tokens.colors.primary }}>
+                    Clear All
+                  </Button>
+                ) : null}
+              </Stack>
+            </Stack>
+          </Paper>
+
+          {selectedIds.size > 0 ? (
+            <Paper variant="outlined" sx={{ px: 2, py: 1, mb: 2, borderRadius: `${tokens.radius.button}px`, bgcolor: '#EEF2FF', borderColor: '#C7D2FE' }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{selectedIds.size} user(s) selected</Typography>
+                <Button size="small" onClick={() => setSelectedIds(new Set())} sx={{ textTransform: 'none', fontWeight: 600 }}>
+                  Clear selection
+                </Button>
+              </Stack>
+            </Paper>
+          ) : null}
+
+          {users.length === 0 ? (
+            <EmptyState
+              title="No users found"
+              description="Add a user or adjust your filters to get started."
+              actionText="Add User"
+              onActionClick={() => setInviteOpen(true)}
+              actionPermission="users.manage"
+              actionIcon={<AddIcon />}
+            />
+          ) : filteredUsers.length === 0 ? (
+            <EmptyState title="No users match your filters." description="Try different search terms or clear your filters." actionText="Clear Filters" onActionClick={clearFilters} />
           ) : (
             <>
-              <TableContainer sx={{ maxHeight: 'calc(100vh - 420px)', overflowX: 'auto' }}>
-                <Table stickyHeader sx={{ minWidth: 980 }}>
+              <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: `${tokens.radius.card}px`, borderColor: tokens.colors.border, overflow: 'auto' }}>
+                <Table size="medium" aria-label="Users">
                   <TableHead>
-                    <TableRow>
-                      <TableCell padding="checkbox" sx={{ bgcolor: '#F8FAFC' }} />
-                      {['User', 'Role', 'Company', 'Permissions', 'Status', 'Last Active', 'Created', 'Actions'].map((h) => (
-                        <TableCell key={h} sx={{ fontWeight: 750, bgcolor: '#F8FAFC', fontSize: '0.75rem', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          {h}
+                    <TableRow sx={{ bgcolor: '#F8FAFC' }}>
+                      <TableCell padding="checkbox" sx={{ bgcolor: '#F8FAFC' }}>
+                        <Checkbox
+                          size="small"
+                          indeterminate={pagedUsers.some((u) => selectedIds.has(u.id)) && !pagedUsers.every((u) => selectedIds.has(u.id))}
+                          checked={pagedUsers.length > 0 && pagedUsers.every((u) => selectedIds.has(u.id))}
+                          onChange={togglePageAll}
+                          inputProps={{ 'aria-label': 'Select all users on page' }}
+                        />
+                      </TableCell>
+                      {['User', 'Email', 'Role', 'Team', 'Status', 'Last Active', 'Projects', 'Actions'].map((col) => (
+                        <TableCell key={col} sx={{ fontWeight: 700, color: tokens.colors.textSecondary, whiteSpace: 'nowrap' }}>
+                          {col}
                         </TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {paged.map((user) => {
-                      const isSelected = selectedId === user.id;
-                      return (
-                        <TableRow
-                          key={user.id}
-                          hover
-                          selected={isSelected}
-                          onClick={() => {
-                            setSelectedId(user.id);
-                            setPanelOpen(true);
-                          }}
-                          sx={{
-                            cursor: 'pointer',
-                            transition: tokens.motion.fast,
-                            '&.Mui-selected': { bgcolor: 'rgba(79,70,229,0.04)' },
-                            '&:hover': { bgcolor: 'rgba(79,70,229,0.03)' },
-                          }}
-                        >
-                          <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
-                            <Checkbox
-                              size="small"
-                              checked={isSelected}
-                              onChange={() => setSelectedId(isSelected ? null : user.id)}
-                              inputProps={{ 'aria-label': `Select ${user.name}` }}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ maxWidth: 260 }}>
-                            <Stack
-                              direction="row"
-                              sx={{
-                                alignItems: "center",
-                                gap: 1.5
-                              }}>
-                              <Avatar sx={{ width: 40, height: 40, bgcolor: user.color, fontWeight: 700, fontSize: '0.85rem' }}>
-                                {initials(user.name)}
-                              </Avatar>
-                              <Box sx={{ minWidth: 0 }}>
-                                <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }} noWrap>{user.name}</Typography>
-                                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }} noWrap>{user.email}</Typography>
-                              </Box>
-                            </Stack>
-                          </TableCell>
-                          <TableCell><RoleBadge role={user.role} /></TableCell>
-                          <TableCell>
-                            <Typography sx={{ fontSize: '0.8125rem', fontWeight: 600 }} noWrap>{user.department}</Typography>
-                          </TableCell>
-                          <TableCell sx={{ maxWidth: 220 }}>
-                            <Stack
-                              direction="row"
-                              useFlexGap
-                              sx={{
-                                gap: 0.5,
-                                flexWrap: "wrap"
-                              }}>
-                              {user.permissions.slice(0, 3).map((p) => (
-                                <Chip
-                                  key={p}
-                                  size="small"
-                                  label={p}
-                                  sx={{ height: 22, fontSize: '0.65rem', fontWeight: 650, bgcolor: '#F1F5F9', color: '#475569' }}
-                                />
-                              ))}
-                              {user.permissions.length > 3 && (
-                                <Chip
-                                  size="small"
-                                  label={`+${user.permissions.length - 3}`}
-                                  sx={{ height: 22, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#EEF2FF', color: '#4338CA' }}
-                                />
-                              )}
-                            </Stack>
-                          </TableCell>
-                          <TableCell><StatusBadge status={user.status} /></TableCell>
-                          <TableCell>
-                            <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary' }}>
-                              {formatDateTime(user.lastActive)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary' }}>
-                              {formatDate(user.createdAt)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            <Stack direction="row" sx={{
-                              gap: 0.25
-                            }}>
-                              <Tooltip title="View">
-                                <IconButton
-                                  size="small"
-                                  aria-label={`View ${user.name}`}
-                                  onClick={() => {
-                                    setSelectedId(user.id);
-                                    setPanelOpen(true);
-                                  }}
-                                >
-                                  <ViewIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                              <IconButton
-                                size="small"
-                                aria-label={`More actions for ${user.name}`}
-                                onClick={(e) => {
-                                  setMenuAnchor(e.currentTarget);
-                                  setMenuUser(user);
-                                }}
-                              >
-                                <MoreIcon fontSize="small" />
-                              </IconButton>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                    {pagedUsers.map((user) => (
+                      <TableRow key={user.id} hover sx={{ cursor: 'pointer' }} onClick={() => openUserDetails(user)}>
+                        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            size="small"
+                            checked={selectedIds.has(user.id)}
+                            onChange={() => toggleRow(user.id)}
+                            inputProps={{ 'aria-label': `Select ${user.name}` }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ minWidth: 200 }}>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Avatar sx={{ bgcolor: user.color, width: 40, height: 40, fontWeight: 700, fontSize: '0.875rem' }}>
+                              {initials(user.name)}
+                            </Avatar>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }} noWrap>{user.name}</Typography>
+                              <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary' }} noWrap>
+                                {user.roleLabel || user.role}
+                              </Typography>
+                            </Box>
+                          </Stack>
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.875rem' }}>{user.email}</TableCell>
+                        <TableCell><RoleBadge role={user.role} /></TableCell>
+                        <TableCell sx={{ fontSize: '0.875rem', fontWeight: 500 }}>{user.team || '—'}</TableCell>
+                        <TableCell><StatusBadge status={user.status} /></TableCell>
+                        <TableCell sx={{ fontSize: '0.875rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                          {formatUserLastActive(user)}
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>{getUserProjectCount(user, projects.length)}</TableCell>
+                        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                          <IconButton size="small" aria-label={`Actions for ${user.name}`} onClick={(e) => { setMenuAnchor(e.currentTarget); setMenuUser(user); }}>
+                            <MoreIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </TableContainer>
 
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                sx={{
-                  justifyContent: "space-between",
-                  alignItems: { xs: 'stretch', sm: 'center' },
-                  gap: 2,
-                  px: 2.5,
-                  py: 2,
-                  borderTop: '1px solid',
-                  borderColor: 'divider'
-                }}>
-                <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
-                  Showing {from} to {to} of {filtered.length} users
-                </Typography>
-                <Stack
-                  direction="row"
-                  useFlexGap
-                  sx={{
-                    alignItems: "center",
-                    gap: 2,
-                    flexWrap: "wrap"
-                  }}>
-                  <TextField
-                    select
-                    size="small"
-                    value={rowsPerPage}
-                    onChange={(e) => {
-                      setRowsPerPage(Number(e.target.value));
-                      setPage(1);
-                    }}
-                    sx={{ minWidth: 120, '& .MuiOutlinedInput-root': { height: 36 }, '& .MuiSelect-select': { fontSize: '0.8rem', fontWeight: 600 } }}
-                  >
-                    {[5, 10, 20, 50].map((n) => (
-                      <MenuItem key={n} value={n}>{n} per page</MenuItem>
-                    ))}
-                  </TextField>
-                  <Pagination
-                    count={pageCount}
-                    page={page}
-                    onChange={(_e, v) => setPage(v)}
-                    color="primary"
-                    shape="rounded"
-                    size="small"
-                  />
-                </Stack>
-              </Stack>
+              <PaginationBar
+                page={page}
+                pageCount={pageCount}
+                totalCount={filteredUsers.length}
+                rowsPerPage={rowsPerPage}
+                onPageChange={setPage}
+                onRowsPerPageChange={(n) => { setRowsPerPage(n); setPage(1); }}
+                rowsPerPageOptions={[8, 10, 20, 50]}
+                itemLabel="users"
+              />
             </>
           )}
-        </Paper>
+        </>
+      )}
 
-        {/* Right details panel */}
-        {selected && panelOpen && (
-          <Paper
-            elevation={0}
-            sx={{
-              ...glassSx,
-              p: 0,
-              position: { xl: 'sticky' },
-              top: 88,
-              maxHeight: { xl: 'calc(100vh - 120px)' },
-              overflow: 'auto',
-              display: { xs: 'none', xl: 'block' },
-            }}
-          >
-            <Stack
-              direction="row"
-              sx={{
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                p: 2.5,
-                pb: 2
-              }}>
-              <Stack
-                direction="row"
-                sx={{
-                  gap: 1.5,
-                  alignItems: "center",
-                  minWidth: 0
-                }}>
-                <Avatar sx={{ width: 56, height: 56, bgcolor: selected.color, fontWeight: 800, fontSize: '1.15rem' }}>
-                  {initials(selected.name)}
-                </Avatar>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }} noWrap>{selected.name}</Typography>
-                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }} noWrap>{selected.email}</Typography>
-                  <Box sx={{ mt: 1 }}><RoleBadge role={selected.role} /></Box>
-                </Box>
-              </Stack>
-              <Stack
-                direction="row"
-                sx={{
-                  alignItems: "center",
-                  gap: 1
-                }}>
-                <StatusBadge status={selected.status} />
-                <IconButton size="small" aria-label="Close panel" onClick={() => setPanelOpen(false)}>
-                  <CloseIcon fontSize="small" />
-                </IconButton>
-              </Stack>
-            </Stack>
+      <UserDetailsDrawer
+        open={detailsOpen}
+        user={detailsUser}
+        onClose={() => setDetailsOpen(false)}
+        onEditClient={openEditClient}
+        onCopy={handleCopy}
+        onEmail={handleEmailClient}
+        onToggle={handleToggleClient}
+        onDelete={setDeleteTarget}
+        onViewDeveloper={(user) => navigate(`/developers/${user.rawId}`)}
+      />
 
-            <Divider />
-
-            <Box sx={{ px: 2.5, py: 2 }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5, mb: 2.5 }}>
-                {[
-                  ...(selected.department && selected.department !== '—'
-                    ? [['Company', selected.department]]
-                    : []),
-                  ['Role', selected.role],
-                  ...(selected.projectName ? [['Project', selected.projectName]] : []),
-                  ...(selected.source === 'client'
-                    ? [['Password', selected.passwordProtected ? 'Protected' : 'None']]
-                    : []),
-                  ['Last active', selected.lastActive ? formatDateTime(selected.lastActive) : '—'],
-                ].map(([label, value]) => (
-                  <Box key={label}>
-                    <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', mb: 0.35 }}>
-                      {label.toUpperCase()}
-                    </Typography>
-                    <Typography sx={{ fontSize: '0.8125rem', fontWeight: 650 }} noWrap>{value}</Typography>
-                  </Box>
-                ))}
-              </Box>
-
-              <Typography sx={{ fontWeight: 750, fontSize: '0.875rem', mb: 1.5 }}>Permissions</Typography>
-              <Stack spacing={0.5} sx={{ mb: 2.5 }}>
-                {MODULE_PERMS.map((mod) => {
-                  const allowed = mod.roles.includes(selected.role) && selected.status === 'Active';
-                  return (
-                    <Stack
-                      key={mod.key}
-                      direction="row"
-                      sx={{
-                        alignItems: "center",
-                        gap: 1.25,
-                        py: 1,
-                        px: 1.25,
-                        borderRadius: 2,
-                        bgcolor: allowed ? 'rgba(34,197,94,0.06)' : '#F8FAFC',
-                        border: '1px solid',
-                        borderColor: allowed ? 'rgba(34,197,94,0.2)' : 'divider'
-                      }}>
-                      <Box sx={{ color: allowed ? '#16A34A' : '#94A3B8', display: 'flex' }}>{mod.icon}</Box>
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography sx={{ fontSize: '0.8rem', fontWeight: 700 }}>{mod.label}</Typography>
-                        <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }} noWrap>{mod.desc}</Typography>
-                      </Box>
-                      <Chip
-                        size="small"
-                        label={allowed ? 'Allowed' : 'Denied'}
-                        sx={{
-                          height: 22,
-                          fontWeight: 750,
-                          fontSize: '0.65rem',
-                          bgcolor: allowed ? '#DCFCE7' : '#F1F5F9',
-                          color: allowed ? '#166534' : '#64748B',
-                        }}
-                      />
-                    </Stack>
-                  );
-                })}
-              </Stack>
-
-              {(selected.activity || []).length > 0 && (
-                <>
-                  <Typography sx={{ fontWeight: 750, fontSize: '0.875rem', mb: 1.5 }}>Recent Activity</Typography>
-                  <Stack spacing={1.25} sx={{ mb: 2.5 }}>
-                    {selected.activity.map((a, i) => (
-                      <Stack key={i} direction="row" sx={{
-                        gap: 1.25
-                      }}>
-                        <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#6366F1', mt: 0.75, flexShrink: 0 }} />
-                        <Box>
-                          <Typography sx={{ fontSize: '0.8rem', fontWeight: 650 }}>{a.text}</Typography>
-                          <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>{a.when}</Typography>
-                        </Box>
-                      </Stack>
-                    ))}
-                  </Stack>
-                </>
-              )}
-
-              <Stack sx={{
-                gap: 1
-              }}>
-                {selected.source === 'client' && (
-                  <>
-                    <Button
-                      fullWidth
-                      variant="contained"
-                      startIcon={<EditIcon />}
-                      onClick={() => openEditClient(selected)}
-                    >
-                      Edit Client
-                    </Button>
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      startIcon={<CopyIcon />}
-                      onClick={() => handleCopy(selected.shareUrl)}
-                    >
-                      Copy Share Link
-                    </Button>
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      startIcon={<EmailIcon />}
-                      onClick={() => handleEmailClient(selected)}
-                      disabled={!selected.email || selected.email === '—'}
-                      sx={{ textTransform: 'none', fontWeight: 700 }}
-                    >
-                      Email Link to Client
-                    </Button>
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      startIcon={selected.status === 'Active' ? <DisableIcon /> : <EnableIcon />}
-                      onClick={() => handleToggleClient(selected)}
-                    >
-                      {selected.status === 'Active' ? 'Disable Access' : 'Enable Access'}
-                    </Button>
-                  </>
-                )}
-                {selected.source !== 'admin' && (
-                  <Button
-                    fullWidth
-                    variant="outlined"
-                    color="error"
-                    startIcon={<DeleteIcon />}
-                    onClick={() => setDeleteTarget(selected)}
-                  >
-                    Delete User
-                  </Button>
-                )}
-              </Stack>
-            </Box>
-          </Paper>
-        )}
-      </Box>
-      {/* Row actions menu */}
-      <Menu
-        anchorEl={menuAnchor}
-        open={Boolean(menuAnchor)}
-        onClose={() => setMenuAnchor(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-      >
-        <MenuItem
-          onClick={() => {
-            setSelectedId(menuUser?.id);
-            setPanelOpen(true);
-            setMenuAnchor(null);
-          }}
-        >
-          <ViewIcon fontSize="small" sx={{ mr: 1.5 }} /> View
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
+        <MenuItem onClick={() => { setMenuAnchor(null); openUserDetails(menuUser); }}>
+          <ViewIcon fontSize="small" sx={{ mr: 1.5 }} /> View User
         </MenuItem>
-        {menuUser?.source === 'developer' && (
-          <MenuItem
-            onClick={() => {
-              setMenuAnchor(null);
-              showAlert('Edit developer from the Developers page', 'info');
-            }}
-          >
-            <EditIcon fontSize="small" sx={{ mr: 1.5 }} /> Edit
-          </MenuItem>
-        )}
-        {menuUser?.source === 'client' && (
+        {menuUser?.source === 'client' ? (
           <>
-            <MenuItem
-              onClick={() => {
-                openEditClient(menuUser);
-                setMenuAnchor(null);
-              }}
-            >
-              <EditIcon fontSize="small" sx={{ mr: 1.5 }} /> Edit
+            <MenuItem onClick={() => { openEditClient(menuUser); setMenuAnchor(null); }}>
+              <EditIcon fontSize="small" sx={{ mr: 1.5 }} /> Edit User
             </MenuItem>
-            <MenuItem
-              onClick={() => {
-                handleCopy(menuUser.shareUrl);
-                setMenuAnchor(null);
-              }}
-            >
-              <CopyIcon fontSize="small" sx={{ mr: 1.5 }} /> Copy Link
+            <MenuItem onClick={() => { handleEmailClient(menuUser); setMenuAnchor(null); }} disabled={!menuUser.email || menuUser.email === '—'}>
+              <EmailIcon fontSize="small" sx={{ mr: 1.5 }} /> Resend Invitation
             </MenuItem>
-            <MenuItem
-              onClick={() => {
-                handleEmailClient(menuUser);
-                setMenuAnchor(null);
-              }}
-              disabled={!menuUser.email || menuUser.email === '—'}
-            >
-              <EmailIcon fontSize="small" sx={{ mr: 1.5 }} /> Email Client
+            <MenuItem onClick={() => { handleToggleClient(menuUser); setMenuAnchor(null); }}>
+              {menuUser.status === 'Active' ? 'Deactivate' : 'Reactivate'}
             </MenuItem>
-            <MenuItem
-              onClick={() => {
-                handleToggleClient(menuUser);
-                setMenuAnchor(null);
-              }}
-            >
-              {menuUser.status === 'Active' ? (
-                <><DisableIcon fontSize="small" sx={{ mr: 1.5 }} /> Disable</>
-              ) : (
-                <><EnableIcon
-                  sx={{
-                    fontSize: "small",
-                    mr: 1.5
-                  }} /> Enable</>
-              )}
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                handleRegenerate(menuUser);
-                setMenuAnchor(null);
-              }}
-            >
+            <MenuItem onClick={() => { handleRegenerate(menuUser); setMenuAnchor(null); }}>
               <ResetIcon fontSize="small" sx={{ mr: 1.5 }} /> Regenerate Link
             </MenuItem>
           </>
-        )}
-        {menuUser?.source !== 'admin' && (
-          <MenuItem
-            onClick={() => {
-              setDeleteTarget(menuUser);
-              setMenuAnchor(null);
-            }}
-            sx={{ color: 'error.main' }}
-          >
+        ) : null}
+        {menuUser?.source === 'developer' ? (
+          <MenuItem onClick={() => { setMenuAnchor(null); navigate(`/developers/${menuUser.rawId}`); }}>
+            <ViewIcon fontSize="small" sx={{ mr: 1.5 }} /> View Developer
+          </MenuItem>
+        ) : null}
+        {menuUser?.source !== 'admin' ? (
+          <MenuItem onClick={() => { setDeleteTarget(menuUser); setMenuAnchor(null); }} sx={{ color: 'error.main' }}>
             <DeleteIcon fontSize="small" sx={{ mr: 1.5 }} /> Delete
           </MenuItem>
-        )}
+        ) : null}
       </Menu>
-      {/* Invite client — same create-client-link flow as before */}
-      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle sx={{ fontWeight: 800 }}>Create Client Link</DialogTitle>
+
+      <Menu anchorEl={addMenuAnchor} open={Boolean(addMenuAnchor)} onClose={() => setAddMenuAnchor(null)}>
+        <MenuItem onClick={() => { setAddMenuAnchor(null); setClientForm(emptyClientForm); setInviteOpen(true); }}>
+          Invite Client User
+        </MenuItem>
+        <MenuItem onClick={() => { setAddMenuAnchor(null); setAddDevOpen(true); }}>
+          Add Developer User
+        </MenuItem>
+      </Menu>
+
+      <Menu anchorEl={bulkMenuAnchor} open={Boolean(bulkMenuAnchor)} onClose={() => setBulkMenuAnchor(null)}>
+        <MenuItem onClick={() => runBulkAction('activate')}>Activate selected</MenuItem>
+        <MenuItem onClick={() => runBulkAction('deactivate')}>Deactivate selected</MenuItem>
+        <MenuItem onClick={() => runBulkAction('delete')} sx={{ color: 'error.main' }}>Delete selected</MenuItem>
+      </Menu>
+
+      <Dialog open={inviteOpen} onClose={() => !saving && setInviteOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 700 }}>Invite User (Client)</DialogTitle>
         <Box component="form" onSubmit={handleCreateClient}>
           <DialogContent>
-            <Typography
-              variant="body2"
-              sx={{
-                color: "text.secondary",
-                mb: 2
-              }}>
-              Generate a secure share link so a client can view one project’s tasks in read-only mode.
-            </Typography>
             <Stack spacing={2} sx={{ mt: 0.5 }}>
-              <TextField
-                required
-                label="Client name"
-                value={clientForm.clientName}
-                onChange={(e) => setClientForm({ ...clientForm, clientName: e.target.value })}
-                autoFocus
-              />
-              <TextField
-                label="Company"
-                value={clientForm.company}
-                onChange={(e) => setClientForm({ ...clientForm, company: e.target.value })}
-              />
-              <TextField
-                type="email"
-                label="Client email"
-                value={clientForm.email}
-                onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
-                placeholder="client@company.com"
-                helperText="Optional — if set, your mail app opens with the invite link ready to send"
-              />
-              <TextField
-                required
-                select
-                label="Project"
-                value={clientForm.projectId}
-                onChange={(e) => setClientForm({ ...clientForm, projectId: e.target.value })}
-                helperText="Client will only see this project"
-              >
-                {projects.length === 0 ? (
-                  <MenuItem value="" disabled>
-                    No projects available — upload one first
-                  </MenuItem>
-                ) : (
-                  projects.map((p) => (
-                    <MenuItem key={p.id} value={p.id}>
-                      {p.name}
-                    </MenuItem>
-                  ))
-                )}
+              <TextField required label="Full name" value={clientForm.clientName} onChange={(e) => setClientForm({ ...clientForm, clientName: e.target.value })} autoFocus />
+              <TextField label="Team / Company" value={clientForm.company} onChange={(e) => setClientForm({ ...clientForm, company: e.target.value })} />
+              <TextField type="email" label="Email" value={clientForm.email} onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })} helperText="Required for sending invitations" />
+              <TextField required select label="Project access" value={clientForm.projectId} onChange={(e) => setClientForm({ ...clientForm, projectId: e.target.value })}>
+                {projects.map((p) => (<MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>))}
               </TextField>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={clientForm.passwordProtected}
-                    onChange={(e) =>
-                      setClientForm({ ...clientForm, passwordProtected: e.target.checked })
-                    }
-                  />
-                }
-                label="Password protect link"
-              />
-              {clientForm.passwordProtected && (
-                <TextField
-                  required
-                  type="password"
-                  label="Password"
-                  value={clientForm.password}
-                  onChange={(e) => setClientForm({ ...clientForm, password: e.target.value })}
-                />
-              )}
+              <FormControlLabel control={<Switch checked={clientForm.passwordProtected} onChange={(e) => setClientForm({ ...clientForm, passwordProtected: e.target.checked })} />} label="Password protect link" />
+              {clientForm.passwordProtected ? (
+                <TextField required type="password" label="Password" value={clientForm.password} onChange={(e) => setClientForm({ ...clientForm, password: e.target.value })} />
+              ) : null}
             </Stack>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setInviteOpen(false)}>Cancel</Button>
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={saving || !clientForm.projectId || !clientForm.clientName.trim()}
-            >
-              {saving ? 'Creating…' : 'Create Client Link'}
-            </Button>
+            <Button onClick={() => setInviteOpen(false)} disabled={saving}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={saving || !clientForm.projectId}>{saving ? 'Sending…' : 'Send Invitation'}</Button>
           </DialogActions>
         </Box>
       </Dialog>
 
-      {/* Edit client — change details / password without regenerating the link */}
-      <Dialog
-        open={editOpen}
-        onClose={() => {
-          setEditOpen(false);
-          setEditingClientId(null);
-          setEditHadPassword(false);
-          setClientForm(emptyClientForm);
-        }}
-        fullWidth
-        maxWidth="sm"
-      >
-        <DialogTitle sx={{ fontWeight: 800 }}>Edit Client</DialogTitle>
+      <Dialog open={editOpen} onClose={() => !saving && setEditOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 700 }}>Edit User</DialogTitle>
         <Box component="form" onSubmit={handleUpdateClient}>
           <DialogContent>
-            <Typography
-              variant="body2"
-              sx={{
-                color: 'text.secondary',
-                mb: 2,
-              }}
-            >
-              Update client details or change the share-link password. Leave the password blank to keep the current one.
-            </Typography>
-            <Stack spacing={2} sx={{ mt: 0.5 }}>
-              <TextField
-                required
-                label="Client name"
-                value={clientForm.clientName}
-                onChange={(e) => setClientForm({ ...clientForm, clientName: e.target.value })}
-                autoFocus
-              />
-              <TextField
-                label="Company"
-                value={clientForm.company}
-                onChange={(e) => setClientForm({ ...clientForm, company: e.target.value })}
-              />
-              <TextField
-                type="email"
-                label="Client email"
-                value={clientForm.email}
-                onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
-                placeholder="client@company.com"
-              />
-              <TextField
-                label="Project"
-                value={
-                  projects.find((p) => String(p.id) === String(clientForm.projectId))?.name ||
-                  `Project #${clientForm.projectId}`
-                }
-                fullWidth
-                slotProps={{ input: { readOnly: true } }}
-                helperText="Project is locked to this link — create a new client link to change it"
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={clientForm.passwordProtected}
-                    onChange={(e) =>
-                      setClientForm({ ...clientForm, passwordProtected: e.target.checked, password: '' })
-                    }
-                  />
-                }
-                label="Password protect link"
-              />
-              {clientForm.passwordProtected && (
-                <TextField
-                  type="password"
-                  label={editHadPassword ? 'New password' : 'Password'}
-                  value={clientForm.password}
-                  onChange={(e) => setClientForm({ ...clientForm, password: e.target.value })}
-                  helperText={
-                    editHadPassword
-                      ? 'Leave blank to keep the existing password'
-                      : 'Required to enable password protection'
-                  }
-                  required={!editHadPassword}
-                  autoComplete="new-password"
-                />
-              )}
+            <Stack spacing={2}>
+              <TextField required label="Full name" value={clientForm.clientName} onChange={(e) => setClientForm({ ...clientForm, clientName: e.target.value })} />
+              <TextField label="Team / Company" value={clientForm.company} onChange={(e) => setClientForm({ ...clientForm, company: e.target.value })} />
+              <TextField type="email" label="Email" value={clientForm.email} onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })} />
+              <FormControlLabel control={<Switch checked={clientForm.passwordProtected} onChange={(e) => setClientForm({ ...clientForm, passwordProtected: e.target.checked, password: '' })} />} label="Password protect link" />
+              {clientForm.passwordProtected ? (
+                <TextField type="password" label={editHadPassword ? 'New password' : 'Password'} value={clientForm.password} onChange={(e) => setClientForm({ ...clientForm, password: e.target.value })} helperText={editHadPassword ? 'Leave blank to keep existing password' : undefined} />
+              ) : null}
             </Stack>
           </DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => {
-                setEditOpen(false);
-                setEditingClientId(null);
-                setEditHadPassword(false);
-                setClientForm(emptyClientForm);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={saving || !clientForm.clientName.trim()}
-            >
-              {saving ? 'Saving…' : 'Save Changes'}
-            </Button>
+            <Button onClick={() => setEditOpen(false)} disabled={saving}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</Button>
           </DialogActions>
         </Box>
       </Dialog>
-      {/* Add developer */}
-      <Dialog open={addDevOpen} onClose={() => setAddDevOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle sx={{ fontWeight: 800 }}>Add User (Developer)</DialogTitle>
+
+      <Dialog open={addDevOpen} onClose={() => !saving && setAddDevOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 700 }}>Add User (Developer)</DialogTitle>
         <Box component="form" onSubmit={handleCreateDev}>
           <DialogContent>
-            <Stack spacing={2} sx={{ mt: 0.5 }}>
-              <TextField
-                required
-                label="Full name"
-                value={devForm.name}
-                onChange={(e) => setDevForm({ ...devForm, name: e.target.value })}
-              />
-              <TextField
-                type="email"
-                label="Email"
-                value={devForm.email}
-                onChange={(e) => setDevForm({ ...devForm, email: e.target.value })}
-              />
-              <TextField
-                label="Avatar color"
-                type="color"
-                value={devForm.color}
-                onChange={(e) => setDevForm({ ...devForm, color: e.target.value })}
-                slotProps={{
-                  inputLabel: { shrink: true }
-                }}
-              />
+            <Stack spacing={2}>
+              <TextField required label="Full name" value={devForm.name} onChange={(e) => setDevForm({ ...devForm, name: e.target.value })} />
+              <TextField type="email" label="Email" value={devForm.email} onChange={(e) => setDevForm({ ...devForm, email: e.target.value })} />
+              <TextField label="Avatar color" type="color" value={devForm.color} onChange={(e) => setDevForm({ ...devForm, color: e.target.value })} InputLabelProps={{ shrink: true }} />
             </Stack>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setAddDevOpen(false)}>Cancel</Button>
-            <Button type="submit" variant="contained" disabled={saving}>
-              {saving ? 'Saving…' : 'Add Developer'}
-            </Button>
+            <Button onClick={() => setAddDevOpen(false)} disabled={saving}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={saving}>{saving ? 'Saving…' : 'Add User'}</Button>
           </DialogActions>
         </Box>
       </Dialog>
+
       <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} fullWidth maxWidth="xs">
-        <DialogTitle>Delete user?</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>Delete user?</DialogTitle>
         <DialogContent>
-          <Typography>
-            Remove <strong>{deleteTarget?.name}</strong> from the workspace? This cannot be undone.
-          </Typography>
+          <Typography>Remove <strong>{deleteTarget?.name}</strong> from the system? This cannot be undone.</Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)}>Cancel</Button>
           <Button color="error" variant="contained" onClick={handleDeleteConfirm}>Delete</Button>
         </DialogActions>
       </Dialog>
-      <Snackbar
-        open={alert.open}
-        autoHideDuration={4000}
-        onClose={() => setAlert({ ...alert, open: false })}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert
-          onClose={() => setAlert({ ...alert, open: false })}
-          severity={alert.severity}
-          variant="filled"
-          sx={{ width: '100%' }}
-        >
+
+      <Dialog open={Boolean(bulkConfirm)} onClose={() => !bulkWorking && setBulkConfirm(null)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 700 }}>Confirm bulk action</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {bulkConfirm?.action === 'delete'
+              ? `Delete ${bulkConfirm?.count} selected user(s)? This cannot be undone.`
+              : `${bulkConfirm?.action === 'activate' ? 'Activate' : 'Deactivate'} ${bulkConfirm?.count} selected user(s)?`}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkConfirm(null)} disabled={bulkWorking}>Cancel</Button>
+          <Button variant="contained" color={bulkConfirm?.action === 'delete' ? 'error' : 'primary'} onClick={confirmBulkAction} disabled={bulkWorking}>
+            {bulkWorking ? <CircularProgress size={20} /> : 'Confirm'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar open={alert.open} autoHideDuration={4000} onClose={() => setAlert({ ...alert, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert onClose={() => setAlert({ ...alert, open: false })} severity={alert.severity} variant="filled" sx={{ width: '100%' }}>
           {alert.message}
         </Alert>
       </Snackbar>

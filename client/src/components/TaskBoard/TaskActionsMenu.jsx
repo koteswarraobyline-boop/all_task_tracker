@@ -20,6 +20,7 @@ import {
 export default function TaskActionsMenu({
   task,
   canEdit,
+  canDelete,
   canAssign,
   canStatus,
   onView,
@@ -37,7 +38,7 @@ export default function TaskActionsMenu({
   const items = [
     {
       key: 'view',
-      label: 'View',
+      label: 'View Details',
       icon: <ViewIcon fontSize="small" />,
       onClick: () => onView?.(task),
       show: true,
@@ -58,7 +59,7 @@ export default function TaskActionsMenu({
     },
     {
       key: 'status',
-      label: 'Move Status',
+      label: 'Change Status',
       icon: <StatusIcon fontSize="small" />,
       onClick: () => onMoveStatus?.(task),
       show: canStatus,
@@ -73,10 +74,10 @@ export default function TaskActionsMenu({
     },
     {
       key: 'delete',
-      label: 'Delete',
+      label: 'Delete Task',
       icon: <DeleteIcon fontSize="small" />,
       onClick: () => onDelete?.(task),
-      show: canEdit && Boolean(onDelete),
+      show: canDelete && Boolean(onDelete),
       danger: true,
     },
   ].filter((i) => i.show);

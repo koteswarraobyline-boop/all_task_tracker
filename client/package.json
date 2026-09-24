@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:prod": "npm run build && vite preview --port 4173",
+    "lint": "oxlint"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -26,13 +27,16 @@
     "@svar-ui/react-gantt": "^2.7.1",
     "axios": "^1.18.1",
     "framer-motion": "^12.42.2",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "papaparse": "^5.5.4",
     "primeicons": "^7.0.0",
     "primereact": "10.9.7",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
-    "recharts": "^3.10.0"
+    "recharts": "^3.10.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

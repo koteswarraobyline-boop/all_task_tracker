@@ -2,9 +2,6 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
   LineChart,
   Line,
   XAxis,
@@ -26,7 +23,6 @@ import {
   Tooltip,
   Menu,
   MenuItem,
-  Divider,
   Skeleton,
   Alert,
   Link,
@@ -43,21 +39,19 @@ import {
   Share as ShareIcon,
   MoreVert as MoreIcon,
   ViewKanban as BoardIcon,
-  CalendarMonth as CalendarIcon,
-  Timeline as TimelineIcon,
   FileDownload as ExportIcon,
   ContentCopy as CopyIcon,
   Link as LinkIcon,
   ChevronRight as ChevronIcon,
   Refresh as RefreshIcon,
   OpenInNew as OpenIcon,
+  Event as EventIcon,
 } from '@mui/icons-material';
 import api from '../services/api';
 import PageContainer, { MetricCard } from '../components/PageContainer';
 import ShareProjectDialog from '../components/ShareProjectDialog';
 import TaskDetailsDrawer, { splitTitleAndDescription } from '../components/TaskDetailsDrawer';
 import Can from '../components/Can';
-import { ProjectNavTabs } from '../components/ProjectDashboard';
 import {
   formatProjectId,
   formatShortDate,
@@ -77,12 +71,20 @@ import {
   getOverdueDays,
   isWorkTask,
 } from '../components/ProjectDashboard/dashboardHelpers';
+import {
+  exportTasksExcel,
+  exportTasksPdf,
+  buildProjectExportSummary,
+} from '../utils/projectExport';
+import PerformanceDonutChart, {
+  STATUS_CHART_COLORS,
+  PRIORITY_CHART_COLORS,
+} from '../components/ProjectDashboard/PerformanceDonutChart';
 import { DelayAnalysisDrawer, ProjectHealthBadge } from '../components/DeliveryHealth';
-import { deliveryStatusLabel } from '../utils/deliveryHealth';
+import { deliveryStatusLabel, DELIVERY_STATUS_COLORS } from '../utils/deliveryHealth';
 import { tokens } from '../theme';
 import { useProjectId } from '../hooks/useProjectId';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
-import { PRIORITY_COLORS } from '../utils/taskManagementConstants';
 import { startOfDay } from '../utils/taskManagementConstants';
 
 const glassSx = {
@@ -95,11 +97,11 @@ const glassSx = {
 
 function SectionCard({ title, action, children, sx = {} }) {
   return (
-    <Paper elevation={0} sx={{ ...glassSx, p: 3, height: '100%', ...sx }}>
+    <Paper elevation={0} sx={{ ...glassSx, p: { xs: 2, md: 2.5 }, height: '100%', ...sx }}>
       {(title || action) && (
-        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mb={2.5}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mb={2}>
           {title ? (
-            <Typography sx={{ fontWeight: 750, fontSize: '0.95rem', letterSpacing: '-0.01em' }}>
+            <Typography sx={{ fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em', color: 'text.primary' }}>
               {title}
             </Typography>
           ) : (
@@ -110,6 +112,75 @@ function SectionCard({ title, action, children, sx = {} }) {
       )}
       {children}
     </Paper>
+  );
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <Stack
+      direction="row"
+      justifyContent="space-between"
+      alignItems="flex-start"
+      gap={2}
+      sx={{
+        py: 1,
+        borderBottom: '1px solid',
+        borderColor: 'divider',
+        '&:last-child': { borderBottom: 'none' },
+      }}
+    >
+      <Typography
+        sx={{
+          fontSize: '0.8125rem',
+          color: 'text.secondary',
+          fontWeight: 600,
+          flex: '0 0 46%',
+          maxWidth: '46%',
+          lineHeight: 1.4,
+        }}
+      >
+        {label}
+      </Typography>
+      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', textAlign: 'right' }}>
+        {children}
+      </Box>
+    </Stack>
+  );
+}
+
+function MetaStat({ label, value, icon }) {
+  return (
+    <Stack direction="row" alignItems="flex-start" gap={1.25} sx={{ minWidth: 0 }}>
+      {icon ? (
+        <Box
+          sx={{
+            width: 36,
+            height: 36,
+            borderRadius: `${tokens.radius.button}px`,
+            bgcolor: '#F1F5F9',
+            color: 'text.secondary',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </Box>
+      ) : null}
+      <Box sx={{ minWidth: 0 }}>
+        <Typography sx={{ fontSize: '0.6875rem', fontWeight: 700, color: 'text.secondary', letterSpacing: '0.05em', textTransform: 'uppercase', mb: 0.35 }}>
+          {label}
+        </Typography>
+        {typeof value === 'string' || typeof value === 'number' ? (
+          <Typography sx={{ fontWeight: 700, fontSize: '0.9375rem', lineHeight: 1.35, wordBreak: 'break-word' }}>
+            {value}
+          </Typography>
+        ) : (
+          value
+        )}
+      </Box>
+    </Stack>
   );
 }
 
@@ -187,6 +258,7 @@ export default function Dashboard() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [snack, setSnack] = useState('');
+  const [snackSeverity, setSnackSeverity] = useState('info');
 
   const favKey = `tt_fav_project_${projectId}`;
   const today = useMemo(() => startOfDay(), []);
@@ -333,7 +405,7 @@ export default function Dashboard() {
           color = '#EF4444';
         } else if (t.status === 'In Development') {
           action = 'started';
-          color = '#4F46E5';
+          color = '#2563EB';
         }
         return { id: t.id, who, action, title, when: timeAgo(t.updatedAt), color: t.developer?.color || color };
       });
@@ -349,19 +421,60 @@ export default function Dashboard() {
     navigate(`${basePath}/tasks${q}`);
   };
 
+  const exportSummary = useMemo(
+    () =>
+      buildProjectExportSummary(project, metrics, {
+        deliveryStatus: project?.deliveryStatus || dashboardData?.deliveryStatus,
+      }),
+    [project, metrics, dashboardData?.deliveryStatus]
+  );
+
+  const handleProjectExport = async (format) => {
+    setExportMenuAnchor(null);
+    if (tasksError) {
+      setSnackSeverity('error');
+      setSnack('Cannot export — tasks failed to load.');
+      return;
+    }
+    if (!tasks.length) {
+      setSnackSeverity('warning');
+      setSnack('No tasks to export.');
+      return;
+    }
+    const name = project?.name || 'project';
+    try {
+      if (format === 'csv') {
+        exportTasksCsv(tasks, name);
+      } else if (format === 'xlsx') {
+        await exportTasksExcel(tasks, name, exportSummary);
+      } else if (format === 'pdf') {
+        await exportTasksPdf(tasks, name, exportSummary);
+      }
+      setSnackSeverity('success');
+      setSnack(`${format.toUpperCase()} export downloaded`);
+    } catch (err) {
+      console.error('Export failed:', err);
+      setSnackSeverity('error');
+      setSnack('Export failed. Please try again.');
+    }
+  };
+
   const handleCopyClientLink = async () => {
     setShareMenuAnchor(null);
     try {
       const records = await api.listClientAccess({ projectId: project?.id });
       const record = (records || []).find((r) => Number(r.projectId) === Number(project?.id));
       if (!record?.shareUrl) {
+        setSnackSeverity('warning');
         setSnack('Generate a share link first via Share Client Portal');
         setShareOpen(true);
         return;
       }
       await navigator.clipboard.writeText(record.shareUrl);
+      setSnackSeverity('success');
       setSnack('Client link copied');
     } catch {
+      setSnackSeverity('error');
       setSnack('Could not copy link');
     }
   };
@@ -374,6 +487,8 @@ export default function Dashboard() {
       icon: <TasksIcon />,
       tint: '#EFF6FF',
       iconColor: '#2563EB',
+      trend: 'All tasks',
+      trendVariant: 'neutral',
       onClick: () => goTasks(),
     },
     {
@@ -383,6 +498,8 @@ export default function Dashboard() {
       icon: <CheckIcon />,
       tint: '#ECFDF5',
       iconColor: '#059669',
+      trend: `${pctOf(metrics.completed, metrics.total)}% of total`,
+      trendUp: true,
       onClick: () => goTasks('Completed'),
     },
     {
@@ -392,6 +509,8 @@ export default function Dashboard() {
       icon: <DevIcon />,
       tint: '#EFF6FF',
       iconColor: '#2563EB',
+      trend: `${pctOf(metrics.inDevelopment, metrics.total)}% of total`,
+      trendVariant: 'neutral',
       onClick: () => goTasks('In Development'),
     },
     {
@@ -400,7 +519,9 @@ export default function Dashboard() {
       pct: pctOf(metrics.testing, metrics.total),
       icon: <TestingIcon />,
       tint: '#FAF5FF',
-      iconColor: '#9333EA',
+      iconColor: '#2563EB',
+      trend: `${pctOf(metrics.testing, metrics.total)}% of total`,
+      trendVariant: 'neutral',
       onClick: () => goTasks('Testing'),
     },
     {
@@ -410,6 +531,8 @@ export default function Dashboard() {
       icon: <HoldIcon />,
       tint: '#FFF7ED',
       iconColor: '#EA580C',
+      trend: `${pctOf(metrics.onHold, metrics.total)}% of total`,
+      trendVariant: metrics.onHold > 0 ? 'warning' : 'neutral',
       onClick: () => goTasks('On Hold'),
     },
     {
@@ -419,6 +542,8 @@ export default function Dashboard() {
       icon: <BlockedIcon />,
       tint: '#FEF2F2',
       iconColor: '#DC2626',
+      trend: `${pctOf(metrics.blocked, metrics.total)}% of total`,
+      trendUp: metrics.blocked === 0,
       onClick: () => goTasks('Blocked'),
     },
   ];
@@ -430,7 +555,7 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <PageContainer maxWidth={tokens.layout.maxWidth}>
+      <PageContainer maxWidth="100%" sx={{ maxWidth: '100%', px: { xs: 1.5, sm: 2, md: 2 }, py: { xs: 1.5, md: 2 } }}>
         <Skeleton variant="text" width={200} height={24} sx={{ mb: 1 }} />
         <Skeleton variant="rounded" height={160} sx={{ mb: 3, borderRadius: 3 }} />
         <Skeleton variant="rounded" height={48} sx={{ mb: 3, borderRadius: 2 }} />
@@ -445,48 +570,58 @@ export default function Dashboard() {
   }
 
   return (
-    <PageContainer maxWidth={tokens.layout.maxWidth} sx={{ py: { xs: 2, md: 2.5 } }}>
+    <PageContainer maxWidth="100%" sx={{ maxWidth: '100%', px: { xs: 1.5, sm: 2, md: 2 }, py: { xs: 1.5, md: 2 } }}>
       {snack && (
-        <Alert severity="info" onClose={() => setSnack('')} sx={{ mb: 2 }}>
+        <Alert severity={snackSeverity} onClose={() => setSnack('')} sx={{ mb: 2 }}>
           {snack}
         </Alert>
       )}
 
       {/* Breadcrumb */}
-      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 2 }}>
-        <Link component={RouterLink} to="/projects" underline="hover" sx={{ fontWeight: 650, fontSize: '0.875rem', color: 'text.secondary' }}>
+      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 1.5, minWidth: 0 }}>
+        <Link component={RouterLink} to="/projects" underline="hover" sx={{ fontWeight: 600, fontSize: '0.8125rem', color: 'text.secondary', flexShrink: 0 }}>
           Projects
         </Link>
-        <ChevronIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-        <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>{project?.name}</Typography>
+        <ChevronIcon sx={{ fontSize: 16, color: 'text.secondary', flexShrink: 0 }} />
+        <Typography noWrap sx={{ fontWeight: 600, fontSize: '0.8125rem', color: 'text.primary', minWidth: 0 }}>
+          {project?.name}
+        </Typography>
       </Stack>
 
       {/* Header */}
-      <Paper elevation={0} sx={{ ...glassSx, p: { xs: 2.5, md: 3 }, mb: 2 }}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ lg: 'flex-start' }} gap={2}>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1} mb={0.75}>
-              <Typography component="h1" sx={{ fontSize: { xs: '1.5rem', md: '1.85rem' }, fontWeight: 800, letterSpacing: '-0.025em' }}>
-                {project?.name}
-              </Typography>
-              {project?.deliveryStatus && <ProjectHealthBadge status={project.deliveryStatus} />}
-              <Tooltip title={favorite ? 'Unfavorite' : 'Favorite'}>
-                <IconButton onClick={toggleFavorite} size="small" sx={{ color: favorite ? '#F59E0B' : 'text.secondary' }}>
-                  {favorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+      <Paper elevation={0} sx={{ ...glassSx, overflow: 'hidden', mb: 2 }}>
+        <Box sx={{ p: { xs: 2, md: 2.5 } }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ md: 'flex-start' }} gap={2}>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Stack direction="row" alignItems="center" gap={1} mb={1} flexWrap="wrap">
+                <Typography
+                  component="h1"
+                  noWrap
+                  sx={{
+                    fontSize: { xs: '1.35rem', md: '1.65rem' },
+                    fontWeight: 800,
+                    letterSpacing: '-0.02em',
+                    maxWidth: { xs: '100%', md: '520px' },
+                  }}
+                >
+                  {project?.name}
+                </Typography>
+                {project?.deliveryStatus && <ProjectHealthBadge status={project.deliveryStatus} />}
+                <Tooltip title={favorite ? 'Unfavorite' : 'Favorite'}>
+                  <IconButton onClick={toggleFavorite} size="small" sx={{ color: favorite ? '#F59E0B' : 'text.secondary' }}>
+                    {favorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+                  </IconButton>
+                </Tooltip>
+                <IconButton size="small" onClick={(e) => setMoreMenuAnchor(e.currentTarget)}>
+                  <MoreIcon fontSize="small" />
                 </IconButton>
-              </Tooltip>
-              <IconButton size="small" onClick={(e) => setMoreMenuAnchor(e.currentTarget)}>
-                <MoreIcon fontSize="small" />
-              </IconButton>
-            </Stack>
-            <Typography sx={{ fontSize: '0.875rem', color: 'text.secondary', fontWeight: 600 }}>
-              {projectCode}
-              {project?.description ? ` · ${project.description}` : ''}
-            </Typography>
-          </Box>
+              </Stack>
+              <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary', fontWeight: 600 }}>
+                {projectCode}
+              </Typography>
+            </Box>
 
-          <Stack spacing={1.5} alignItems={{ xs: 'stretch', lg: 'flex-end' }} sx={{ flexShrink: 0 }}>
-            <Stack direction="row" flexWrap="wrap" gap={1} justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
+            <Stack direction="row" flexWrap="wrap" gap={1} sx={{ flexShrink: 0 }}>
               <Can permission="project.share">
                 <Button
                   variant="outlined"
@@ -494,61 +629,72 @@ export default function Dashboard() {
                   startIcon={<ShareIcon />}
                   endIcon={<ChevronIcon sx={{ fontSize: 16, transform: 'rotate(90deg)' }} />}
                   onClick={(e) => setShareMenuAnchor(e.currentTarget)}
-                  sx={{ bgcolor: 'background.paper', height: 36, textTransform: 'none', fontWeight: 600 }}
+                  sx={{ bgcolor: 'background.paper', height: 38, textTransform: 'none', fontWeight: 600, px: 1.5 }}
                 >
                   Share Project
                 </Button>
               </Can>
+              <Can permission="report.export">
               <Button
                 variant="outlined"
                 size="small"
                 startIcon={<ExportIcon />}
                 endIcon={<ChevronIcon sx={{ fontSize: 16, transform: 'rotate(90deg)' }} />}
                 onClick={(e) => setExportMenuAnchor(e.currentTarget)}
-                sx={{ bgcolor: 'background.paper', height: 36, textTransform: 'none', fontWeight: 600 }}
+                disabled={Boolean(tasksError) || tasks.length === 0}
+                sx={{ bgcolor: 'background.paper', height: 38, textTransform: 'none', fontWeight: 600, px: 1.5 }}
               >
                 Export Report
               </Button>
-              <Button variant="contained" size="small" startIcon={<BoardIcon />} onClick={() => goTasks()} sx={{ height: 36, textTransform: 'none', fontWeight: 600 }}>
+              </Can>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<BoardIcon />}
+                onClick={() => goTasks()}
+                sx={{ height: 38, textTransform: 'none', fontWeight: 600, px: 2, boxShadow: '0 4px 12px rgba(79,70,229,0.25)' }}
+              >
                 Open Task Board
               </Button>
             </Stack>
-            <Stack direction="row" flexWrap="wrap" gap={2.5} justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
-              {[
-                ['Start Date', formatShortDate(project?.startDate)],
-                ['Target Date', formatShortDate(project?.activeDeliveryDate || project?.dueDate)],
-              ].map(([label, value]) => (
-                <Box key={label} sx={{ textAlign: { lg: 'right' } }}>
-                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', letterSpacing: '0.04em' }}>
-                    {label}
-                  </Typography>
-                  <Typography sx={{ fontWeight: 700, fontSize: '0.85rem' }}>{value}</Typography>
-                </Box>
-              ))}
-              <Box sx={{ textAlign: { lg: 'right' } }}>
-                <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', letterSpacing: '0.04em', mb: 0.25 }}>
-                  Project Owner
-                </Typography>
-                <Stack direction="row" alignItems="center" gap={0.75} justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}>
-                  <Avatar sx={{ width: 24, height: 24, fontSize: '0.65rem', bgcolor: tokens.colors.primary }}>
-                    {initials(ownerLabel)}
-                  </Avatar>
-                  <Typography sx={{ fontWeight: 700, fontSize: '0.85rem' }}>{ownerLabel}</Typography>
-                </Stack>
-              </Box>
-            </Stack>
           </Stack>
-        </Stack>
-      </Paper>
+        </Box>
 
-      <ProjectNavTabs projectId={projectId} />
+        <Box
+          sx={{
+            px: { xs: 2, md: 2.5 },
+            py: 2,
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            bgcolor: '#FAFBFC',
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' },
+            gap: { xs: 2, sm: 3 },
+          }}
+        >
+          <MetaStat label="Start Date" value={formatShortDate(project?.startDate)} icon={<EventIcon sx={{ fontSize: 18 }} />} />
+          <MetaStat label="Target Date" value={formatShortDate(project?.activeDeliveryDate || project?.dueDate)} icon={<EventIcon sx={{ fontSize: 18 }} />} />
+          <MetaStat
+            label="Project Owner"
+            value={
+              <Stack direction="row" alignItems="center" gap={1}>
+                <Avatar sx={{ width: 26, height: 26, fontSize: '0.7rem', bgcolor: tokens.colors.primary }}>
+                  {initials(ownerLabel)}
+                </Avatar>
+                <Typography sx={{ fontWeight: 700, fontSize: '0.9375rem' }}>{ownerLabel}</Typography>
+              </Stack>
+            }
+            icon={<Avatar sx={{ width: 18, height: 18, fontSize: '0.55rem', bgcolor: tokens.colors.primary }}>{initials(ownerLabel)}</Avatar>}
+          />
+        </Box>
+      </Paper>
 
       {/* KPI cards */}
       <Box
         sx={{
           display: 'grid',
           gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)', lg: 'repeat(3,1fr)', xl: 'repeat(6,1fr)' },
-          gap: 1.5,
+          gap: 2,
           mb: 2.5,
         }}
       >
@@ -560,12 +706,14 @@ export default function Dashboard() {
             icon={k.icon}
             tint={k.tint}
             iconColor={k.iconColor}
-            trend={k.label === 'Total Tasks' ? 'All tasks' : `${k.pct}%`}
-            trendUp={k.label === 'Completed' || k.label === 'Total Tasks'}
+            trend={k.trend}
+            trendUp={k.trendUp}
+            trendVariant={k.trendVariant}
             onClick={k.onClick}
             sx={{
-              '& .MuiCardContent-root': { p: 2.25, '&:last-child': { pb: 2.25 } },
-              '& h1': { fontSize: { xs: '1.65rem', md: '1.85rem' } },
+              minHeight: 132,
+              '& .MuiCardContent-root': { p: 2.5, '&:last-child': { pb: 2.5 } },
+              '& h1': { fontSize: { xs: '1.35rem', md: '1.5rem' } },
             }}
           />
         ))}
@@ -581,65 +729,64 @@ export default function Dashboard() {
           alignItems: 'stretch',
         }}
       >
-        <SectionCard title="Delivery Health" sx={{ p: 2.5 }}>
+        <SectionCard title="Delivery Health" sx={{ p: 2.5, display: 'flex', flexDirection: 'column' }}>
           {tasksError ? (
             <WidgetError message={tasksError} onRetry={loadTasks} />
           ) : (
-            <Stack spacing={2}>
-              <Stack direction="row" alignItems="center" gap={2.5}>
-                <Box sx={{ position: 'relative', width: 112, height: 112, flexShrink: 0 }}>
-                  <CircularProgress variant="determinate" value={100} size={112} thickness={3.5} sx={{ color: '#E2E8F0', position: 'absolute' }} />
-                  <CircularProgress
-                    variant="determinate"
-                    value={healthScore}
-                    size={112}
-                    thickness={3.5}
-                    sx={{
-                      color: healthScore >= 70 ? '#22C55E' : healthScore >= 45 ? '#F59E0B' : '#EF4444',
-                      position: 'absolute',
-                      '& .MuiCircularProgress-circle': { strokeLinecap: 'round' },
-                    }}
-                  />
-                  <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography sx={{ fontWeight: 800, fontSize: '1.75rem', lineHeight: 1 }}>{healthScore}</Typography>
-                    <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 700 }}>Score /100</Typography>
-                  </Box>
+            <Stack spacing={2.5} sx={{ flex: 1, minHeight: 0, alignItems: 'center' }}>
+              <Box sx={{ position: 'relative', width: 112, height: 112, flexShrink: 0, mt: 0.5 }}>
+                <CircularProgress variant="determinate" value={100} size={112} thickness={3.5} sx={{ color: '#E2E8F0', position: 'absolute' }} />
+                <CircularProgress
+                  variant="determinate"
+                  value={healthScore}
+                  size={112}
+                  thickness={3.5}
+                  sx={{
+                    color: healthScore >= 70 ? '#22C55E' : healthScore >= 45 ? '#F59E0B' : '#EF4444',
+                    position: 'absolute',
+                    '& .MuiCircularProgress-circle': { strokeLinecap: 'round' },
+                  }}
+                />
+                <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography sx={{ fontWeight: 650, fontSize: '1.5rem', lineHeight: 1 }}>{healthScore}</Typography>
+                  <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 700 }}>Score /100</Typography>
                 </Box>
-                <Stack spacing={1} sx={{ flex: 1 }}>
-                  {[
-                    { label: 'Ahead of Schedule', count: scheduleBuckets.ahead, color: '#22C55E' },
-                    { label: 'On Schedule', count: scheduleBuckets.onSchedule, color: '#2563EB' },
-                    { label: 'At Risk', count: scheduleBuckets.atRisk, color: '#F59E0B' },
-                    { label: 'Overdue', count: scheduleBuckets.overdue, color: '#EF4444' },
-                  ].map((b) => (
-                    <Stack key={b.label} direction="row" justifyContent="space-between" alignItems="center">
-                      <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary', fontWeight: 600 }}>{b.label}</Typography>
-                      <Typography sx={{ fontWeight: 800, fontSize: '0.9rem', color: b.color }}>{b.count}</Typography>
-                    </Stack>
-                  ))}
-                </Stack>
-              </Stack>
-              <Box
-                sx={{
-                  p: 1.5,
-                  borderRadius: `${tokens.radius.button}px`,
-                  bgcolor: project?.deliveryStatus === 'OVERDUE' ? '#FEF2F2' : '#ECFDF5',
-                  border: '1px solid',
-                  borderColor: project?.deliveryStatus === 'OVERDUE' ? '#FECACA' : '#A7F3D0',
-                }}
-              >
-                <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700, color: project?.deliveryStatus === 'OVERDUE' ? '#B91C1C' : '#047857', mb: 0.25 }}>
-                  {deliveryStatusLabel(project?.deliveryStatus || delayAnalysis?.deliveryStatus || 'ON_TRACK')}
-                </Typography>
-                <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', lineHeight: 1.45 }}>
-                  {deliveryStatusMessage(project?.deliveryStatus || delayAnalysis?.deliveryStatus)}
-                </Typography>
               </Box>
-              {delayAnalysis && (
-                <Button size="small" variant="outlined" onClick={() => setDelayDrawerOpen(true)} sx={{ alignSelf: 'flex-start', fontWeight: 700, textTransform: 'none' }}>
-                  View Delay Analysis
-                </Button>
-              )}
+
+              <Box sx={{ width: '100%', mt: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                {(() => {
+                  const deliveryStatus = project?.deliveryStatus || delayAnalysis?.deliveryStatus || 'ON_TRACK';
+                  const statusStyle = DELIVERY_STATUS_COLORS[deliveryStatus] || DELIVERY_STATUS_COLORS.ON_TRACK;
+                  return (
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        borderRadius: `${tokens.radius.button}px`,
+                        bgcolor: statusStyle.bg,
+                        border: '1px solid',
+                        borderColor: statusStyle.border,
+                      }}
+                    >
+                      <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700, color: statusStyle.color, mb: 0.35 }}>
+                        {deliveryStatusLabel(deliveryStatus)}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', lineHeight: 1.5 }}>
+                        {deliveryStatusMessage(deliveryStatus)}
+                      </Typography>
+                    </Box>
+                  );
+                })()}
+                {delayAnalysis && (
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    onClick={() => setDelayDrawerOpen(true)}
+                    sx={{ fontWeight: 700, textTransform: 'none', py: 1, borderRadius: `${tokens.radius.button}px` }}
+                  >
+                    View Delay Analysis
+                  </Button>
+                )}
+              </Box>
             </Stack>
           )}
         </SectionCard>
@@ -658,7 +805,7 @@ export default function Dashboard() {
                   <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
                   <RechartsTooltip formatter={(v, name) => [`${v}%`, name]} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="actualPct" name="Actual Progress" stroke="#4F46E5" strokeWidth={2.5} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="actualPct" name="Actual Progress" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 3 }} />
                   <Line type="monotone" dataKey="plannedPct" name="Baseline" stroke="#94A3B8" strokeWidth={1.5} strokeDasharray="5 5" dot={false} />
                 </LineChart>
               </ResponsiveContainer>
@@ -666,133 +813,84 @@ export default function Dashboard() {
           )}
         </SectionCard>
 
-        <SectionCard title="Project Details" sx={{ p: 2.5, display: { xs: 'none', xl: 'block' } }}>
-          <Stack spacing={1.75}>
-            {[
-              ['Project ID', projectCode],
-              ['Owner', ownerLabel],
-              ['Project Manager', project?.manager?.name || '—'],
-              ['Priority', project?.priority || 'Medium'],
-              ['Status', project?.status || 'Active'],
-              ['Target Date', formatShortDate(project?.activeDeliveryDate || project?.dueDate)],
-              ['Team Size', `${teamSize} Members`],
-            ].map(([label, value]) => (
-              <Stack key={label} direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600 }}>{label}</Typography>
-                {label === 'Status' ? (
-                  <Chip size="small" label={value} sx={{ fontWeight: 700, height: 24, ...statusChip }} />
-                ) : label === 'Priority' ? (
-                  <Chip size="small" label={value} sx={{ fontWeight: 700, height: 24, bgcolor: '#FEE2E2', color: '#B91C1C' }} />
-                ) : (
-                  <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem', textAlign: 'right' }}>{value}</Typography>
-                )}
-              </Stack>
-            ))}
-            {project?.tags?.length > 0 && (
-              <Box sx={{ pt: 0.5 }}>
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600, mb: 0.75 }}>Tags</Typography>
-                <Stack direction="row" flexWrap="wrap" gap={0.5}>
-                  {project.tags.slice(0, 3).map((tag) => (
-                    <Chip key={tag} size="small" label={tag} sx={{ height: 24, fontWeight: 650, bgcolor: '#EEF2FF', color: '#4338CA' }} />
-                  ))}
-                  {project.tags.length > 3 && (
-                    <Chip size="small" label={`+${project.tags.length - 3}`} sx={{ height: 24, fontWeight: 650 }} />
-                  )}
-                </Stack>
-              </Box>
-            )}
+        <SectionCard title="Project Details" sx={{ display: { xs: 'none', xl: 'flex' }, flexDirection: 'column' }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <Box>
+              <DetailRow label="Project ID">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{projectCode}</Typography>
+              </DetailRow>
+              <DetailRow label="Owner">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{ownerLabel}</Typography>
+              </DetailRow>
+              <DetailRow label="Project Manager">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{project?.manager?.name || '—'}</Typography>
+              </DetailRow>
+              <DetailRow label="Priority">
+                <Chip size="small" label={project?.priority || 'Medium'} sx={{ fontWeight: 700, height: 24, bgcolor: '#FEE2E2', color: '#B91C1C' }} />
+              </DetailRow>
+              <DetailRow label="Status">
+                <Chip size="small" label={project?.status || 'Active'} sx={{ fontWeight: 700, height: 24, ...statusChip }} />
+              </DetailRow>
+              <DetailRow label="Target Date">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{formatShortDate(project?.activeDeliveryDate || project?.dueDate)}</Typography>
+              </DetailRow>
+              <DetailRow label="Team Size">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{teamSize} Members</Typography>
+              </DetailRow>
+            </Box>
             {project?.description && (
-              <Box sx={{ pt: 0.5 }}>
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600, mb: 0.5 }}>Description</Typography>
-                <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+              <Box
+                sx={{
+                  mt: 'auto',
+                  pt: 2,
+                  borderTop: '1px solid',
+                  borderColor: 'divider',
+                }}
+              >
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600, mb: 0.75 }}>
+                  Description
+                </Typography>
+                <Typography sx={{ fontSize: '0.8125rem', color: 'text.secondary', lineHeight: 1.6 }}>
                   {project.description}
                 </Typography>
               </Box>
             )}
-          </Stack>
+          </Box>
         </SectionCard>
       </Box>
 
       <Stack spacing={2} sx={{ minWidth: 0 }}>
           {/* Mobile / tablet project details */}
-          <SectionCard title="Project Details" sx={{ p: 2.5, display: { xs: 'block', xl: 'none' } }}>
-            <Stack spacing={1.75}>
-              {[
-                ['Project ID', projectCode],
-                ['Owner', ownerLabel],
-                ['Project Manager', project?.manager?.name || '—'],
-                ['Team Size', `${teamSize} Members`],
-              ].map(([label, value]) => (
-                <Stack key={label} direction="row" justifyContent="space-between">
-                  <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontWeight: 600 }}>{label}</Typography>
-                  <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{value}</Typography>
-                </Stack>
-              ))}
-            </Stack>
+          <SectionCard title="Project Details" sx={{ display: { xs: 'block', xl: 'none' } }}>
+            <Box>
+              <DetailRow label="Project ID">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{projectCode}</Typography>
+              </DetailRow>
+              <DetailRow label="Owner">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{ownerLabel}</Typography>
+              </DetailRow>
+              <DetailRow label="Project Manager">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{project?.manager?.name || '—'}</Typography>
+              </DetailRow>
+              <DetailRow label="Team Size">
+                <Typography sx={{ fontWeight: 650, fontSize: '0.8125rem' }}>{teamSize} Members</Typography>
+              </DetailRow>
+            </Box>
           </SectionCard>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-            <SectionCard title="Tasks by Status">
-              {statusDonut.length === 0 ? (
-                <EmptyWidget title="No tasks yet" />
-              ) : (
-                <>
-                  <Box sx={{ height: 220 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={statusDonut} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2}>
-                          {statusDonut.map((entry) => (
-                            <Cell key={entry.name} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </Box>
-                  <Stack direction="row" flexWrap="wrap" gap={0.75} justifyContent="center" sx={{ mt: 1 }}>
-                    {statusDonut.map((s) => (
-                      <Chip key={s.name} size="small" label={`${s.name} (${s.value})`} sx={{ height: 24, fontWeight: 650, bgcolor: `${s.color}18`, color: s.color }} />
-                    ))}
-                  </Stack>
-                </>
-              )}
-            </SectionCard>
-
-            <SectionCard title="Tasks by Priority">
-              {priorityDonut.length === 0 ? (
-                <EmptyWidget title="No priority data" />
-              ) : (
-                <>
-                  <Box sx={{ height: 220 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={priorityDonut} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2}>
-                          {priorityDonut.map((entry) => (
-                            <Cell key={entry.name} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </Box>
-                  <Stack direction="row" flexWrap="wrap" gap={0.75} justifyContent="center" sx={{ mt: 1 }}>
-                    {priorityDonut.map((s) => (
-                      <Chip
-                        key={s.name}
-                        size="small"
-                        label={`${s.name} (${s.value})`}
-                        sx={{
-                          height: 24,
-                          fontWeight: 650,
-                          bgcolor: PRIORITY_COLORS[s.name]?.bgcolor || '#F1F5F9',
-                          color: PRIORITY_COLORS[s.name]?.color || '#64748B',
-                        }}
-                      />
-                    ))}
-                  </Stack>
-                </>
-              )}
-            </SectionCard>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5, alignItems: 'stretch' }}>
+            <PerformanceDonutChart
+              title="Status Distribution"
+              data={statusDonut}
+              colorMap={STATUS_CHART_COLORS}
+              emptyMessage="No tasks yet."
+            />
+            <PerformanceDonutChart
+              title="Priority Distribution"
+              data={priorityDonut}
+              colorMap={PRIORITY_CHART_COLORS}
+              emptyMessage="No priority data."
+            />
           </Box>
 
           {/* Bottom lists — 3 columns on large screens */}
@@ -895,18 +993,6 @@ export default function Dashboard() {
               )}
             </SectionCard>
           </Box>
-
-          <Stack direction="row" flexWrap="wrap" gap={1}>
-            <Button variant="outlined" size="small" startIcon={<BoardIcon />} onClick={() => goTasks()} sx={{ textTransform: 'none' }}>
-              View Task Board
-            </Button>
-            <Button variant="outlined" size="small" startIcon={<TimelineIcon />} onClick={() => navigate(`${basePath}/timeline`)} sx={{ textTransform: 'none' }}>
-              View Timeline
-            </Button>
-            <Button variant="outlined" size="small" startIcon={<CalendarIcon />} onClick={() => navigate(`${basePath}/calendar`)} sx={{ textTransform: 'none' }}>
-              Open Calendar
-            </Button>
-          </Stack>
         </Stack>
 
       {/* Menus */}
@@ -933,30 +1019,17 @@ export default function Dashboard() {
       </Menu>
 
       <Menu anchorEl={exportMenuAnchor} open={Boolean(exportMenuAnchor)} onClose={() => setExportMenuAnchor(null)}>
-        <MenuItem
-          onClick={() => {
-            setExportMenuAnchor(null);
-            window.alert('PDF export coming soon');
-          }}
-        >
-          Export PDF
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setExportMenuAnchor(null);
-            window.alert('Excel export coming soon');
-          }}
-        >
-          Export Excel
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setExportMenuAnchor(null);
-            exportTasksCsv(tasks, project?.name || 'project');
-          }}
-        >
+        <MenuItem onClick={() => handleProjectExport('csv')}>
           Export CSV (tasks)
         </MenuItem>
+        <MenuItem onClick={() => handleProjectExport('xlsx')}>
+          Export Excel (.xlsx)
+        </MenuItem>
+        <Can permission="report.export.pdf">
+          <MenuItem onClick={() => handleProjectExport('pdf')}>
+            Export PDF (summary + tasks)
+          </MenuItem>
+        </Can>
       </Menu>
 
       <Menu anchorEl={moreMenuAnchor} open={Boolean(moreMenuAnchor)} onClose={() => setMoreMenuAnchor(null)}>

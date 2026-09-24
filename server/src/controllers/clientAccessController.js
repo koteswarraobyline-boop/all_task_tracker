@@ -1,10 +1,17 @@
 const { randomUUID } = require('crypto');
 const bcrypt = require('bcryptjs');
-const { ClientAccessRecord, Project, Task } = require('../models');
+const { ClientAccessRecord, Project, Task, Comment, ReviewLink, Node } = require('../models');
 const { analyzeProjectDelay } = require('../services/projectDelayAnalysisService');
 const { toClientProject, toClientDelayAnalysis } = require('../dto/clientProjectDto');
 const { toClientTasks } = require('../dto/clientTaskDto');
 const { todayStart } = require('../utils/dateUtils');
+const {
+  ensureNodeForTask,
+  loadTaskCollab,
+  toPublicComment,
+} = require('../services/taskCollabService');
+const { sequelize } = require('../config/database');
+const { Op } = require('sequelize');
 
 const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -14,7 +21,15 @@ function isValidUuidV4(token) {
 }
 
 function buildShareUrl(token) {
-  const base = process.env.CLIENT_APP_URL || 'http://localhost:5174';
+  const configured = String(process.env.CLIENT_APP_URL || '').trim();
+  const isProd = process.env.NODE_ENV === 'production';
+  // Local-first: prefer explicit env, else Vite default in development
+  const base =
+    configured ||
+    (!isProd ? 'http://localhost:5173' : '');
+  if (!base) {
+    throw new Error('CLIENT_APP_URL is not configured');
+  }
   return `${base.replace(/\/$/, '')}/client/${token}`;
 }
 
@@ -111,6 +126,60 @@ async function loadProjectTasks(projectId) {
   });
 }
 
+/** Attach reduced collab counts onto client tasks (no credentials in list). */
+async function attachCollabCounts(projectId, clientTasks) {
+  const nodes = await Node.findAll({
+    where: {
+      projectId,
+      taskId: { [Op.ne]: null },
+      type: 'task',
+    },
+    attributes: ['id', 'taskId'],
+  });
+  if (!nodes.length) {
+    return clientTasks.map((t) => ({
+      ...t,
+      commentCount: 0,
+      reviewLinkCount: 0,
+    }));
+  }
+
+  const nodeIds = nodes.map((n) => n.id);
+  const taskByNode = new Map(nodes.map((n) => [n.id, n.taskId]));
+
+  const [commentCounts, linkCounts] = await Promise.all([
+    Comment.findAll({
+      attributes: ['nodeId', [sequelize.fn('COUNT', sequelize.col('Comment.id')), 'count']],
+      where: { projectId, nodeId: { [Op.in]: nodeIds } },
+      group: ['nodeId'],
+      raw: true,
+    }),
+    ReviewLink.findAll({
+      attributes: ['nodeId', [sequelize.fn('COUNT', sequelize.col('ReviewLink.id')), 'count']],
+      where: { projectId, nodeId: { [Op.in]: nodeIds } },
+      group: ['nodeId'],
+      raw: true,
+    }),
+  ]);
+
+  const commentsByTask = new Map();
+  const linksByTask = new Map();
+  for (const row of commentCounts) {
+    const tid = taskByNode.get(row.nodeId);
+    if (tid != null) commentsByTask.set(tid, parseInt(row.count, 10) || 0);
+  }
+  for (const row of linkCounts) {
+    const tid = taskByNode.get(row.nodeId);
+    if (tid != null) linksByTask.set(tid, parseInt(row.count, 10) || 0);
+  }
+
+  return clientTasks.map((t) => ({
+    ...t,
+    commentCount: commentsByTask.get(t.id) || 0,
+    reviewLinkCount: linksByTask.get(t.id) || 0,
+  }));
+}
+
 async function validateToken(req, res) {
   try {
     const { token } = req.params;
@@ -168,7 +237,7 @@ async function getClientTasks(req, res) {
     const tasks = await loadProjectTasks(projectId);
     const now = todayStart();
     const analysis = analyzeProjectDelay(project, tasks, now);
-    const clientTasks = toClientTasks(tasks, now);
+    const clientTasks = await attachCollabCounts(projectId, toClientTasks(tasks, now));
 
     return res.json({
       project: toClientProject(project, analysis, {
@@ -182,6 +251,76 @@ async function getClientTasks(req, res) {
   } catch (error) {
     console.error('getClientTasks error:', error);
     return res.status(500).json({ error: 'Failed to load shared project tasks' });
+  }
+}
+
+/**
+ * GET /client/:token/tasks/:taskId/collab
+ * Reduced comments, notes, and review credentials for the shared client.
+ */
+async function getClientTaskCollab(req, res) {
+  try {
+    const { token, taskId } = req.params;
+    const password = req.headers['x-share-password'] || req.query.password;
+    const result = await resolveShareAccess(token, password);
+    if (!result.ok) return res.status(result.status).json(result.body);
+
+    const tid = parseInt(taskId, 10);
+    if (!tid) return res.status(400).json({ error: 'Invalid task id' });
+
+    const data = await loadTaskCollab(result.record.projectId, tid, {
+      includeCredentials: true,
+    });
+    if (!data) return res.status(404).json({ error: 'Task not found' });
+
+    return res.json({
+      ...data,
+      // Client-facing author for UI
+      viewerName: result.record.clientName || 'Client',
+    });
+  } catch (error) {
+    console.error('getClientTaskCollab error:', error);
+    return res.status(500).json({ error: 'Failed to load task collaboration' });
+  }
+}
+
+/**
+ * POST /client/:token/tasks/:taskId/comments
+ * Client can leave a note/chat message on a task (reduced payload).
+ */
+async function createClientTaskComment(req, res) {
+  try {
+    const { token, taskId } = req.params;
+    const password = req.headers['x-share-password'] || req.query.password;
+    const result = await resolveShareAccess(token, password);
+    if (!result.ok) return res.status(result.status).json(result.body);
+
+    const tid = parseInt(taskId, 10);
+    const body = String(req.body?.body || '').trim();
+    if (!tid) return res.status(400).json({ error: 'Invalid task id' });
+    if (!body) return res.status(400).json({ error: 'Comment body is required' });
+    if (body.length > 4000) return res.status(400).json({ error: 'Comment is too long' });
+
+    const node = await ensureNodeForTask(result.record.projectId, tid);
+    if (!node) return res.status(404).json({ error: 'Task not found' });
+
+    const authorName =
+      String(req.body?.authorName || '').trim() ||
+      result.record.clientName ||
+      'Client';
+
+    const comment = await Comment.create({
+      projectId: result.record.projectId,
+      nodeId: node.id,
+      authorName: authorName.slice(0, 255),
+      body,
+      status: 'open',
+    });
+
+    return res.status(201).json(toPublicComment(comment));
+  } catch (error) {
+    console.error('createClientTaskComment error:', error);
+    return res.status(500).json({ error: 'Failed to post comment' });
   }
 }
 
@@ -354,6 +493,8 @@ async function deleteAccessRecord(req, res) {
 module.exports = {
   validateToken,
   getClientTasks,
+  getClientTaskCollab,
+  createClientTaskComment,
   getClientDelayAnalysis,
   createAccessRecord,
   listAccessRecords,

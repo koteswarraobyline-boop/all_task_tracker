@@ -23,9 +23,11 @@ import { CSS } from '@dnd-kit/utilities';
 import { splitTitleAndDescription } from './TaskDetailsDrawer';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
 import { getTaskProgressPercent } from '../utils/taskProgress';
+import { shouldShowOverdueAlert } from '../utils/taskManagementConstants';
 import { initials } from '../utils/formatters';
+import { tokens } from '../theme';
 
-const CARD_MIN_HEIGHT = 168;
+const CARD_MIN_HEIGHT = 140;
 const CHIP_SX = {
   height: 22,
   fontSize: '0.6875rem',
@@ -95,8 +97,10 @@ function KanbanTaskCard({
   columnAccent,
   canStatus,
   canEdit = false,
+  canDelete = false,
   onOpen,
   onEdit,
+  onDelete,
   isDragOverlay = false,
 }) {
   const [menuAnchor, setMenuAnchor] = useState(null);
@@ -117,8 +121,7 @@ function KanbanTaskCard({
     .filter(Boolean)
     .slice(0, 2);
   const hours = task.estimatedHours != null ? Number(task.estimatedHours) : null;
-  const overdue =
-    Boolean(task.dueDate) && task.status !== 'Completed' && new Date(task.dueDate) < new Date();
+  const overdue = shouldShowOverdueAlert(task);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -156,21 +159,20 @@ function KanbanTaskCard({
           p: 2,
           mb: 1.5,
           minHeight: CARD_MIN_HEIGHT,
-          borderRadius: '12px',
+          borderRadius: `${tokens.radius.card}px`,
           border: '1px solid',
-          borderColor: isDragOverlay ? '#2563EB' : '#E2E8F0',
+          borderColor: isDragOverlay ? tokens.colors.primary : '#E5E7EB',
           bgcolor: '#FFFFFF',
           cursor: canStatus ? 'grab' : 'pointer',
           boxShadow: isDragOverlay
-            ? '0 16px 40px rgba(37,99,235,0.28), 0 0 0 2px rgba(37,99,235,0.2)'
-            : '0 1px 3px rgba(15,23,42,0.06)',
-          transform: isDragOverlay ? 'rotate(1.5deg) scale(1.02)' : undefined,
-          transition: 'box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease',
+            ? '0 8px 24px rgba(79,70,229,0.18), 0 0 0 1px #4F46E5'
+            : 'none',
+          transform: isDragOverlay ? 'scale(1.01)' : undefined,
+          transition: 'box-shadow 160ms ease, border-color 160ms ease',
           outline: 'none',
           '&:hover': {
-            boxShadow: '0 8px 24px rgba(15,23,42,0.1)',
-            borderColor: `${columnAccent}66`,
-            transform: isDragOverlay ? 'rotate(1.5deg) scale(1.02)' : 'translateY(-2px)',
+            boxShadow: '0 2px 8px rgba(15,23,42,0.08)',
+            borderColor: `${columnAccent}88`,
           },
           '&:focus-visible': {
             boxShadow: `0 0 0 3px ${columnAccent}44`,
@@ -211,7 +213,7 @@ function KanbanTaskCard({
           >
             {title}
           </Typography>
-          {(canEdit || canStatus) && (
+          {(canEdit || canStatus || canDelete) && (
           <IconButton
             size="small"
             aria-label={`More actions for ${title}`}
@@ -398,7 +400,7 @@ function KanbanTaskCard({
           </Stack>
         </Stack>
       </Paper>
-      {(canEdit || canStatus) && (
+      {(canEdit || canStatus || canDelete) && (
       <Menu
         anchorEl={menuAnchor}
         open={Boolean(menuAnchor)}
@@ -424,6 +426,17 @@ function KanbanTaskCard({
             Edit
           </MenuItem>
         ) : null}
+        {canDelete ? (
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null);
+              onDelete?.(task);
+            }}
+            sx={{ color: 'error.main' }}
+          >
+            Delete Task
+          </MenuItem>
+        ) : null}
       </Menu>
       )}
     </>
@@ -434,6 +447,7 @@ export default memo(KanbanTaskCard, (prev, next) => {
   if (prev.isDragOverlay !== next.isDragOverlay) return false;
   if (prev.canStatus !== next.canStatus) return false;
   if (prev.canEdit !== next.canEdit) return false;
+  if (prev.canDelete !== next.canDelete) return false;
   if (prev.columnAccent !== next.columnAccent) return false;
   const a = prev.task;
   const b = next.task;

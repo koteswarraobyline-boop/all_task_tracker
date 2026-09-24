@@ -47,19 +47,23 @@ import {
   Timeline as TimelineIcon,
   CalendarMonth as CalendarIcon,
   TrendingUp as AnalyticsIcon,
+  BarChartOutlined as ChartIcon,
   Groups as TeamIcon,
   EventBusy as DeadlineIcon,
 } from '@mui/icons-material';
-import { motion } from 'framer-motion';
 import api from '../services/api';
 import ProjectGantt from '../components/ProjectGantt/ProjectGantt';
 import TaskDetailsDrawer from '../components/TaskDetailsDrawer';
 import EmptyState from '../components/EmptyState';
-import PageContainer from '../components/PageContainer';
+import PageContainer, { PageHeader } from '../components/PageContainer';
 import { useProjectId } from '../hooks/useProjectId';
+import ProjectPlanTopbar from '../components/ProjectPlanTopbar';
+import { ViewAsBanner } from '../components/ProjectWorkspaceBar';
+import { ProjectWorkspaceProvider } from '../context/ProjectWorkspaceContext';
 import { usePermission } from '../hooks/usePermission';
 import { useRole } from '../context/RoleContext';
 import { getDeveloperDisplayName } from '../utils/developerDisplay';
+import { tokens, planPageSx } from '../theme';
 import {
   STATUS_FILTER_OPTIONS,
   PRIORITY_OPTIONS,
@@ -75,6 +79,13 @@ import {
   isWorkTask,
 } from '../utils/taskManagementConstants';
 
+const btnSx = {
+  textTransform: 'none',
+  fontWeight: 600,
+  fontSize: '0.8125rem',
+  borderRadius: `${tokens.radius.button}px`,
+};
+
 const DEFAULT_FILTERS = {
   statusKey: 'all',
   priorities: [],
@@ -89,52 +100,39 @@ const DEFAULT_FILTERS = {
 };
 
 const SUMMARY_CARDS = [
-  { key: 'total', label: 'Total Tasks', icon: TotalIcon, color: '#64748B', tint: '#F1F5F9' },
-  { key: 'completed', label: 'Completed', icon: CompletedIcon, color: '#22C55E', tint: '#ECFDF5' },
-  { key: 'inProgress', label: 'In Progress', icon: ProgressIcon, color: '#F97316', tint: '#FFF7ED' },
-  { key: 'development', label: 'In Development', icon: DevIcon, color: '#2563EB', tint: '#EFF6FF' },
-  { key: 'testing', label: 'Testing', icon: TestingIcon, color: '#9333EA', tint: '#FAF5FF' },
-  { key: 'blocked', label: 'Blocked', icon: BlockedIcon, color: '#EF4444', tint: '#FEF2F2' },
-  { key: 'overdue', label: 'Overdue', icon: OverdueIcon, color: '#DC2626', tint: '#FEF2F2' },
-  { key: 'completionPct', label: 'Completion', icon: PctIcon, color: '#0EA5E9', tint: '#F0F9FF', isPct: true },
+  { key: 'total', label: 'Total Tasks', icon: TotalIcon, color: tokens.colors.textSecondary, tint: '#F1F5F9' },
+  { key: 'completed', label: 'Completed', icon: CompletedIcon, color: tokens.colors.success, tint: tokens.colors.successBg },
+  { key: 'inProgress', label: 'In Progress', icon: ProgressIcon, color: tokens.colors.primary, tint: tokens.colors.primarySoft },
+  { key: 'development', label: 'In Development', icon: DevIcon, color: tokens.colors.primary, tint: tokens.colors.primarySoft },
+  { key: 'testing', label: 'Testing', icon: TestingIcon, color: tokens.colors.primary, tint: tokens.colors.primarySoft },
+  { key: 'blocked', label: 'Blocked', icon: BlockedIcon, color: tokens.colors.warning, tint: tokens.colors.warningBg },
+  { key: 'overdue', label: 'Overdue', icon: OverdueIcon, color: tokens.colors.danger, tint: tokens.colors.dangerBg },
+  { key: 'completionPct', label: 'Completion', icon: PctIcon, color: tokens.colors.primary, tint: tokens.colors.primarySoft, isPct: true },
 ];
 
-function SummaryCard({ label, value, pct, icon: Icon, color, tint, isDark }) {
+function SummaryCard({ label, value, pct, icon: Icon, color, tint }) {
   return (
     <Paper
-      component={motion.div}
-      whileHover={{ y: -3 }}
-      transition={{ duration: 0.18 }}
       elevation={0}
       sx={{
         p: 1.75,
-        borderRadius: 3,
+        borderRadius: `${tokens.radius.card}px`,
         border: '1px solid',
-        borderColor: 'divider',
-        bgcolor: isDark ? 'background.paper' : '#fff',
-        boxShadow: '0 1px 3px rgba(15,23,42,0.04)',
+        borderColor: tokens.colors.border,
+        bgcolor: tokens.colors.card,
+        boxShadow: tokens.shadow.card,
         height: '100%',
         position: 'relative',
         overflow: 'hidden',
       }}
     >
-      <Box
-        sx={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 4,
-          bgcolor: color,
-        }}
-      />
       <Stack direction="row" spacing={1.25} sx={{ alignItems: 'flex-start' }}>
         <Box
           sx={{
             width: 40,
             height: 40,
-            borderRadius: 2,
-            bgcolor: isDark ? `${color}22` : tint,
+            borderRadius: `${tokens.radius.button}px`,
+            bgcolor: tint,
             color,
             display: 'flex',
             alignItems: 'center',
@@ -142,17 +140,25 @@ function SummaryCard({ label, value, pct, icon: Icon, color, tint, isDark }) {
             flexShrink: 0,
           }}
         >
-          <Icon sx={{ fontSize: 22 }} />
+          <Icon sx={{ fontSize: 20 }} />
         </Box>
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: 'text.secondary', mb: 0.25 }}>
+          <Typography sx={{ fontSize: '0.7rem', fontWeight: 500, color: tokens.colors.textSecondary, mb: 0.25 }}>
             {label}
           </Typography>
-          <Typography sx={{ fontSize: '1.35rem', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+          <Typography
+            sx={{
+              fontSize: '1.25rem',
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.2,
+              color: tokens.colors.text,
+            }}
+          >
             {value}
           </Typography>
           {pct != null && (
-            <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color, mt: 0.35 }}>
+            <Typography sx={{ fontSize: '0.65rem', fontWeight: 600, color, mt: 0.35 }}>
               {pct}% of total
             </Typography>
           )}
@@ -162,7 +168,7 @@ function SummaryCard({ label, value, pct, icon: Icon, color, tint, isDark }) {
   );
 }
 
-function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
+function AnalyticsPanel({ tasks, developers, projectProgress }) {
   const work = useMemo(() => (tasks || []).filter(isWorkTask), [tasks]);
   const completedThisWeek = useMemo(() => {
     const start = startOfWeek();
@@ -206,12 +212,12 @@ function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
 
   const cardSx = {
     p: 2,
-    borderRadius: 3,
+    borderRadius: `${tokens.radius.card}px`,
     border: '1px solid',
-    borderColor: 'divider',
-    bgcolor: isDark ? 'background.paper' : '#fff',
+    borderColor: tokens.colors.border,
+    bgcolor: tokens.colors.card,
     height: '100%',
-    boxShadow: '0 1px 3px rgba(15,23,42,0.04)',
+    boxShadow: tokens.shadow.card,
   };
 
   return (
@@ -223,42 +229,49 @@ function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
           sm: '1fr 1fr',
           lg: '1.2fr 1fr 1fr 1.2fr',
         },
-        gap: 1.5,
-        mb: 2,
+        gap: 1.25,
+        mb: 1.5,
       }}
     >
       <Paper elevation={0} sx={cardSx}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.25 }}>
-          <AnalyticsIcon sx={{ color: '#0EA5E9', fontSize: 20 }} />
-          <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>Project Progress</Typography>
+          <AnalyticsIcon sx={{ color: tokens.colors.primary, fontSize: 20 }} />
+          <Typography sx={{ fontWeight: 650, fontSize: '0.875rem', color: tokens.colors.text }}>
+            Project Progress
+          </Typography>
         </Stack>
-        <Typography sx={{ fontSize: '1.75rem', fontWeight: 800, mb: 1 }}>{projectProgress}%</Typography>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700, mb: 1, color: tokens.colors.text }}>
+          {projectProgress}%
+        </Typography>
         <LinearProgress
           variant="determinate"
           value={projectProgress}
           sx={{
-            height: 10,
+            height: 8,
             borderRadius: 999,
-            bgcolor: isDark ? 'rgba(255,255,255,0.08)' : '#E2E8F0',
+            bgcolor: tokens.colors.progressTrack,
             '& .MuiLinearProgress-bar': {
               borderRadius: 999,
-              background: 'linear-gradient(90deg,#2563EB,#22C55E)',
-              transition: 'transform 0.6s ease',
+              backgroundColor: tokens.colors.primary,
             },
           }}
         />
-        <Typography sx={{ mt: 1.25, fontSize: '0.75rem', color: 'text.secondary', fontWeight: 650 }}>
+        <Typography sx={{ mt: 1.25, fontSize: '0.75rem', color: tokens.colors.textSecondary, fontWeight: 500 }}>
           {completedThisWeek} tasks completed this week
         </Typography>
       </Paper>
 
       <Paper elevation={0} sx={cardSx}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.25 }}>
-          <DeadlineIcon sx={{ color: '#F97316', fontSize: 20 }} />
-          <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>Upcoming Deadlines</Typography>
+          <DeadlineIcon sx={{ color: tokens.colors.textSecondary, fontSize: 20 }} />
+          <Typography sx={{ fontWeight: 650, fontSize: '0.875rem', color: tokens.colors.text }}>
+            Upcoming Deadlines
+          </Typography>
         </Stack>
         {upcoming.length === 0 ? (
-          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No deadlines this week</Typography>
+          <Typography sx={{ fontSize: '0.8rem', color: tokens.colors.textSecondary }}>
+            No deadlines this week
+          </Typography>
         ) : (
           <Stack spacing={0.75}>
             {upcoming.map((t) => (
@@ -266,7 +279,8 @@ function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
                 <Typography
                   sx={{
                     fontSize: '0.78rem',
-                    fontWeight: 650,
+                    fontWeight: 600,
+                    color: tokens.colors.text,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -275,7 +289,17 @@ function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
                   {t.taskId ? `${t.taskId} · ` : ''}
                   {t.taskName}
                 </Typography>
-                <Chip size="small" label={toDateOnly(t.dueDate) || '—'} sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
+                <Chip
+                  size="small"
+                  label={toDateOnly(t.dueDate) || '—'}
+                  sx={{
+                    height: 20,
+                    fontSize: '0.65rem',
+                    fontWeight: 600,
+                    bgcolor: tokens.colors.primarySoft,
+                    color: tokens.colors.primary,
+                  }}
+                />
               </Stack>
             ))}
           </Stack>
@@ -284,11 +308,15 @@ function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
 
       <Paper elevation={0} sx={cardSx}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.25 }}>
-          <OverdueIcon sx={{ color: '#EF4444', fontSize: 20 }} />
-          <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>Overdue Tasks</Typography>
+          <OverdueIcon sx={{ color: tokens.colors.danger, fontSize: 20 }} />
+          <Typography sx={{ fontWeight: 650, fontSize: '0.875rem', color: tokens.colors.text }}>
+            Overdue Tasks
+          </Typography>
         </Stack>
         {overdueList.length === 0 ? (
-          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>None overdue — nice work</Typography>
+          <Typography sx={{ fontSize: '0.8rem', color: tokens.colors.textSecondary }}>
+            None overdue — nice work
+          </Typography>
         ) : (
           <Stack spacing={0.75}>
             {overdueList.map((t) => (
@@ -296,8 +324,8 @@ function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
                 key={t.id}
                 sx={{
                   fontSize: '0.78rem',
-                  fontWeight: 650,
-                  color: '#DC2626',
+                  fontWeight: 600,
+                  color: tokens.colors.danger,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -313,33 +341,52 @@ function AnalyticsPanel({ tasks, developers, isDark, projectProgress }) {
 
       <Paper elevation={0} sx={cardSx}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.25 }}>
-          <TeamIcon sx={{ color: '#6366F1', fontSize: 20 }} />
-          <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>Team Workload</Typography>
+          <TeamIcon sx={{ color: tokens.colors.primary, fontSize: 20 }} />
+          <Typography sx={{ fontWeight: 650, fontSize: '0.875rem', color: tokens.colors.text }}>
+            Team Workload
+          </Typography>
         </Stack>
         {workload.length === 0 ? (
-          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No assignees yet</Typography>
+          <Typography sx={{ fontSize: '0.8rem', color: tokens.colors.textSecondary }}>No assignees yet</Typography>
         ) : (
           <Stack spacing={1}>
             {workload.map((w) => (
               <Box key={w.name}>
                 <Stack direction="row" sx={{ justifyContent: 'space-between', mb: 0.35 }}>
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{w.name}</Typography>
-                  <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', fontWeight: 650 }}>
-                    {w.open} open / {w.total}
+                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 650, color: tokens.colors.text }}>
+                    {w.name}
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.7rem', color: tokens.colors.textSecondary, fontWeight: 500 }}>
+                    {w.open} open · {w.done} done
                   </Typography>
                 </Stack>
                 <LinearProgress
                   variant="determinate"
                   value={w.total ? Math.round((w.done / w.total) * 100) : 0}
-                  sx={{ height: 6, borderRadius: 999 }}
+                  sx={{
+                    height: 5,
+                    borderRadius: 999,
+                    bgcolor: tokens.colors.progressTrack,
+                    '& .MuiLinearProgress-bar': { bgcolor: tokens.colors.primary, borderRadius: 999 },
+                  }}
                 />
               </Box>
             ))}
           </Stack>
         )}
-        <AvatarGroup max={5} sx={{ mt: 1.5, justifyContent: 'flex-start', '& .MuiAvatar-root': { width: 28, height: 28, fontSize: 11 } }}>
+        <AvatarGroup
+          max={5}
+          sx={{
+            mt: 1.5,
+            justifyContent: 'flex-start',
+            '& .MuiAvatar-root': { width: 28, height: 28, fontSize: 11 },
+          }}
+        >
           {workload.map((w) => (
-            <Avatar key={w.name} sx={{ bgcolor: '#E2E8F0', color: '#334155', fontWeight: 800 }}>
+            <Avatar
+              key={w.name}
+              sx={{ bgcolor: tokens.colors.primarySoft, color: tokens.colors.primary, fontWeight: 700 }}
+            >
               {w.name
                 .split(/\s+/)
                 .slice(0, 2)
@@ -558,82 +605,130 @@ export default function ProjectTaskTimeline() {
 
   const fieldSx = {
     minWidth: { xs: '100%', sm: 140 },
-    '& .MuiInputBase-root': { borderRadius: 2, bgcolor: isDark ? 'rgba(255,255,255,0.04)' : '#F8FAFC' },
+    '& .MuiInputBase-root': {
+      borderRadius: `${tokens.radius.button}px`,
+      bgcolor: '#fff',
+      fontSize: '0.8125rem',
+    },
   };
 
   return (
-    <PageContainer maxWidth={1800} sx={{ px: { xs: 1.5, sm: 2, md: 3 }, py: { xs: 2, md: 3 } }}>
-      <Stack
-        direction={{ xs: 'column', md: 'row' }}
-        spacing={1.5}
-        sx={{ mb: 2.5, alignItems: { xs: 'stretch', md: 'flex-start' }, justifyContent: 'space-between' }}
-      >
-        <Box>
-          <Typography
-            component="h1"
-            sx={{
-              fontSize: { xs: '1.5rem', md: '1.85rem' },
-              fontWeight: 800,
-              letterSpacing: '-0.03em',
-              mb: 0.35,
-            }}
-          >
-            Project Timeline
-          </Typography>
-          <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', fontWeight: 550 }}>
-            {project?.name || 'Project'} · Roadmap of phases and delivery
-          </Typography>
-        </Box>
+    <ProjectWorkspaceProvider projectId={projectId}>
+      <PageContainer maxWidth={false} sx={planPageSx}>
+        <PageHeader
+          title={project?.name || 'Project Timeline'}
+          subtitle="Program health and phase progress"
+          actions={
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={loadData}
+                sx={{ ...btnSx, bgcolor: 'background.paper' }}
+              >
+                Sync
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ChartIcon />}
+                onClick={() => navigate(`/projects/${projectId}/dashboard`)}
+                sx={{ ...btnSx, bgcolor: 'background.paper' }}
+              >
+                Analytics
+              </Button>
+            </Stack>
+          }
+          sx={{ mb: 1.5, gap: 1.5 }}
+        />
 
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-          <ToggleButtonGroup
-            exclusive
-            size="small"
-            value="timeline"
-            onChange={(_e, v) => v && navigateView(v)}
-            aria-label="View switcher"
-            sx={{
-              bgcolor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9',
-              borderRadius: 2,
-              p: 0.25,
-              '& .MuiToggleButton-root': {
-                border: 'none',
-                borderRadius: '8px !important',
-                px: 1.25,
-                textTransform: 'none',
+        <ProjectPlanTopbar projectId={projectId} />
+        <ViewAsBanner />
+
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={1.5}
+          sx={{ mb: 1.5, alignItems: { xs: 'stretch', md: 'flex-start' }, justifyContent: 'space-between' }}
+        >
+          <Box>
+            <Typography
+              component="h1"
+              sx={{
+                fontSize: '1.125rem',
                 fontWeight: 700,
-                fontSize: '0.78rem',
-                gap: 0.5,
-                '&.Mui-selected': {
-                  bgcolor: isDark ? '#1e293b' : '#fff',
-                  color: '#2563EB',
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                letterSpacing: '-0.01em',
+                color: tokens.colors.text,
+                mb: 0.25,
+              }}
+            >
+              Project Timeline
+            </Typography>
+            <Typography sx={{ fontSize: '0.8125rem', color: tokens.colors.textSecondary }}>
+              {project?.name || 'Project'} · Roadmap of phases and delivery
+            </Typography>
+          </Box>
+
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value="timeline"
+              onChange={(_e, v) => v && navigateView(v)}
+              aria-label="View switcher"
+              sx={{
+                bgcolor: '#F8FAFC',
+                borderRadius: `${tokens.radius.button}px`,
+                p: 0.25,
+                border: `1px solid ${tokens.colors.border}`,
+                '& .MuiToggleButton-root': {
+                  border: 'none',
+                  borderRadius: '6px !important',
+                  px: 1.25,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.75rem',
+                  gap: 0.5,
+                  color: tokens.colors.textSecondary,
+                  '&.Mui-selected': {
+                    bgcolor: tokens.colors.primary,
+                    color: '#fff',
+                    '&:hover': { bgcolor: tokens.colors.primaryHover },
+                  },
                 },
-              },
-            }}
-          >
-            {VIEW_MODES.map((m) => {
-              const Icon =
-                m.key === 'list'
-                  ? ListIcon
-                  : m.key === 'kanban'
-                    ? KanbanIcon
-                    : m.key === 'calendar'
-                      ? CalendarIcon
-                      : TimelineIcon;
-              return (
-                <ToggleButton key={m.key} value={m.key}>
-                  <Icon sx={{ fontSize: 16 }} />
-                  {!isMobile && m.label}
-                </ToggleButton>
-              );
-            })}
-          </ToggleButtonGroup>
-          <IconButton size="small" onClick={loadData} aria-label="Refresh timeline">
-            <RefreshIcon fontSize="small" />
-          </IconButton>
+              }}
+            >
+              {VIEW_MODES.map((m) => {
+                const Icon =
+                  m.key === 'list'
+                    ? ListIcon
+                    : m.key === 'kanban'
+                      ? KanbanIcon
+                      : m.key === 'calendar'
+                        ? CalendarIcon
+                        : TimelineIcon;
+                return (
+                  <ToggleButton key={m.key} value={m.key}>
+                    <Icon sx={{ fontSize: 16 }} />
+                    {!isMobile && m.label}
+                  </ToggleButton>
+                );
+              })}
+            </ToggleButtonGroup>
+            <IconButton
+              size="small"
+              onClick={loadData}
+              aria-label="Refresh timeline"
+              sx={{
+                color: tokens.colors.textSecondary,
+                border: `1px solid ${tokens.colors.border}`,
+                borderRadius: `${tokens.radius.button}px`,
+              }}
+            >
+              <RefreshIcon fontSize="small" />
+            </IconButton>
+          </Stack>
         </Stack>
-      </Stack>
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}>
@@ -693,7 +788,6 @@ export default function ProjectTaskTimeline() {
                   icon={c.icon}
                   color={c.color}
                   tint={c.tint}
-                  isDark={isDark}
                 />
               );
             })}
@@ -702,7 +796,6 @@ export default function ProjectTaskTimeline() {
           <AnalyticsPanel
             tasks={tasks}
             developers={developers}
-            isDark={isDark}
             projectProgress={projectProgress}
           />
 
@@ -711,15 +804,15 @@ export default function ProjectTaskTimeline() {
             elevation={0}
             sx={{
               p: 1.5,
-              mb: 2,
-              borderRadius: 3,
+              mb: 1.5,
+              borderRadius: `${tokens.radius.card}px`,
               border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: isDark ? 'background.paper' : '#fff',
+              borderColor: tokens.colors.border,
+              bgcolor: tokens.colors.card,
               position: 'sticky',
               top: 0,
               zIndex: 8,
-              boxShadow: '0 4px 16px rgba(15,23,42,0.04)',
+              boxShadow: tokens.shadow.card,
             }}
           >
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
@@ -732,7 +825,7 @@ export default function ProjectTaskTimeline() {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <SearchIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <SearchIcon sx={{ fontSize: 18, color: tokens.colors.textMuted }} />
                     </InputAdornment>
                   ),
                 }}
@@ -809,12 +902,17 @@ export default function ProjectTaskTimeline() {
                 startIcon={<ResetIcon />}
                 onClick={resetFilters}
                 disabled={!activeFilterCount}
-                sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, ml: { sm: 'auto' } }}
+                sx={{
+                  ...btnSx,
+                  ml: { sm: 'auto' },
+                  borderColor: tokens.colors.border,
+                  color: tokens.colors.text,
+                }}
               >
-                Reset Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+                Reset{activeFilterCount ? ` (${activeFilterCount})` : ''}
               </Button>
             </Stack>
-            <Typography sx={{ mt: 1, fontSize: '0.72rem', color: 'text.secondary', fontWeight: 650 }}>
+            <Typography sx={{ mt: 1, fontSize: '0.72rem', color: tokens.colors.textSecondary, fontWeight: 500 }}>
               Showing {filteredWorkCount} of {workTaskCount} tasks
             </Typography>
           </Paper>
@@ -823,11 +921,11 @@ export default function ProjectTaskTimeline() {
             elevation={0}
             sx={{
               p: { xs: 1.25, md: 2 },
-              borderRadius: 3,
+              borderRadius: `${tokens.radius.card}px`,
               border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: isDark ? 'background.paper' : '#fff',
-              boxShadow: '0 4px 24px rgba(15,23,42,0.05)',
+              borderColor: tokens.colors.border,
+              bgcolor: tokens.colors.card,
+              boxShadow: tokens.shadow.card,
               width: '100%',
             }}
           >
@@ -837,15 +935,13 @@ export default function ProjectTaskTimeline() {
               </Box>
             ) : filteredWorkCount === 0 ? (
               <Box sx={{ textAlign: 'center', py: 6 }}>
-                <Typography sx={{ fontWeight: 750, mb: 1 }}>No matching tasks</Typography>
-                <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>
+                <Typography sx={{ fontWeight: 650, mb: 1, color: tokens.colors.text }}>
+                  No matching tasks
+                </Typography>
+                <Typography sx={{ fontSize: '0.85rem', color: tokens.colors.textSecondary, mb: 2 }}>
                   Try adjusting or resetting filters to see timeline bars.
                 </Typography>
-                <Button
-                  variant="contained"
-                  onClick={resetFilters}
-                  sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}
-                >
+                <Button variant="contained" onClick={resetFilters} sx={{ ...btnSx }}>
                   Reset Filters
                 </Button>
               </Box>
@@ -927,6 +1023,7 @@ export default function ProjectTaskTimeline() {
           {alert.message}
         </Alert>
       </Snackbar>
-    </PageContainer>
+      </PageContainer>
+    </ProjectWorkspaceProvider>
   );
 }

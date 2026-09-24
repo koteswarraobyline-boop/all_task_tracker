@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const { Task, Developer, Project } = require('../models');
+const { syncProjectNodesSafe } = require('../services/wbsSyncService');
 
 // GET /projects/:id/tasks
 exports.getProjectTasks = async (req, res) => {
@@ -230,6 +231,7 @@ exports.updateTask = async (req, res) => {
       }],
     });
 
+    syncProjectNodesSafe(updatedTask.projectId);
     res.json(updatedTask);
   } catch (error) {
     console.error('Error updating task:', error);
@@ -355,6 +357,7 @@ exports.createTask = async (req, res) => {
       }],
     });
 
+    syncProjectNodesSafe(projectId);
     return res.status(201).json(full);
   } catch (error) {
     console.error('Error creating task:', error);
@@ -362,7 +365,62 @@ exports.createTask = async (req, res) => {
   }
 };
 
-// DELETE /tasks/:id
+/** Collect task + nested module row ids to remove when deleting a module by taskId key. */
+async function collectModuleCascadeIds(projectId, moduleTaskId) {
+  const taskIds = new Set();
+  const moduleRowIds = new Set();
+
+  async function walk(parentTaskId) {
+    const children = await Task.findAll({
+      where: { projectId, parentId: parentTaskId },
+    });
+    for (const child of children) {
+      if (child.recordType === 'module') {
+        moduleRowIds.add(child.id);
+        await walk(child.taskId);
+      } else {
+        taskIds.add(child.id);
+      }
+    }
+  }
+
+  await walk(moduleTaskId);
+
+  const linkedTasks = await Task.findAll({
+    where: {
+      projectId,
+      module: moduleTaskId,
+      [Op.or]: [{ recordType: { [Op.ne]: 'module' } }, { recordType: null }],
+    },
+  });
+  linkedTasks.forEach((t) => taskIds.add(t.id));
+
+  return {
+    taskIds: [...taskIds],
+    moduleRowIds: [...moduleRowIds],
+  };
+}
+
+async function destroyModuleTree(projectId, moduleRecord) {
+  const moduleKey = moduleRecord.taskId;
+  const { taskIds, moduleRowIds } = await collectModuleCascadeIds(projectId, moduleKey);
+
+  if (taskIds.length) {
+    await Task.destroy({ where: { id: { [Op.in]: taskIds } } });
+  }
+  if (moduleRowIds.length) {
+    await Task.destroy({ where: { id: { [Op.in]: moduleRowIds } } });
+  }
+  await moduleRecord.destroy();
+
+  return {
+    moduleKey,
+    deletedTasks: taskIds.length,
+    deletedModules: moduleRowIds.length + 1,
+  };
+}
+
+// DELETE /tasks/:id — also cascades when the row is a module
 exports.deleteTask = async (req, res) => {
   try {
     const taskId = parseInt(req.params.id, 10);
@@ -375,10 +433,77 @@ exports.deleteTask = async (req, res) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
+    if (task.recordType === 'module') {
+      const projectId = task.projectId;
+      const result = await destroyModuleTree(task.projectId, task);
+      syncProjectNodesSafe(projectId);
+      return res.json({
+        message: 'Module deleted successfully',
+        id: taskId,
+        ...result,
+      });
+    }
+
+    const projectId = task.projectId;
     await task.destroy();
+    syncProjectNodesSafe(projectId);
     return res.json({ message: 'Task deleted successfully', id: taskId });
   } catch (error) {
     console.error('Error deleting task:', error);
     return res.status(500).json({ error: 'Failed to delete task' });
+  }
+};
+
+// DELETE /projects/:id/modules/:moduleKey
+exports.deleteModule = async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.id, 10);
+    if (isNaN(projectId)) {
+      return res.status(400).json({ error: 'Invalid project ID' });
+    }
+
+    const moduleKey = decodeURIComponent(req.params.moduleKey || '').trim();
+    if (!moduleKey || moduleKey === 'Unassigned') {
+      return res.status(400).json({ error: 'Invalid module key' });
+    }
+
+    const moduleRecord = await Task.findOne({
+      where: { projectId, taskId: moduleKey, recordType: 'module' },
+    });
+
+    if (moduleRecord) {
+      const result = await destroyModuleTree(projectId, moduleRecord);
+      return res.json({
+        message: 'Module deleted successfully',
+        ...result,
+      });
+    }
+
+    const orphanTasks = await Task.findAll({
+      where: {
+        projectId,
+        [Op.and]: [
+          { [Op.or]: [{ module: moduleKey }, { parentId: moduleKey }] },
+          { [Op.or]: [{ recordType: { [Op.ne]: 'module' } }, { recordType: null }] },
+        ],
+      },
+    });
+
+    if (!orphanTasks.length) {
+      return res.status(404).json({ error: 'Module not found' });
+    }
+
+    const taskIds = orphanTasks.map((t) => t.id);
+    await Task.destroy({ where: { id: { [Op.in]: taskIds } } });
+
+    return res.json({
+      message: 'Module group deleted successfully',
+      moduleKey,
+      deletedTasks: taskIds.length,
+      deletedModules: 0,
+    });
+  } catch (error) {
+    console.error('Error deleting module:', error);
+    return res.status(500).json({ error: 'Failed to delete module' });
   }
 };

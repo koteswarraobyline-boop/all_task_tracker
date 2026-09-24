@@ -2,13 +2,12 @@ import {
   isWorkTask,
   isOverdue,
   getOverdueDays,
+  shouldShowOverdueAlert,
   startOfDay,
   toDateOnly,
   buildStatusChartData,
   buildPriorityChartData,
-  normalizePriority,
 } from '../../utils/taskManagementConstants';
-import { PRIORITY_COLORS } from '../../utils/taskManagementConstants';
 
 export function formatProjectId(id) {
   return `PRJ-${String(id).padStart(3, '0')}`;
@@ -127,9 +126,16 @@ export function buildProgressTimelinePercent(rawTimeline, taskTotal) {
 }
 
 export function buildPriorityDonutData(tasks) {
+  const DONUT_COLORS = {
+    Critical: '#DC2626',
+    High: '#EA580C',
+    Medium: '#CA8A04',
+    Low: '#16A34A',
+    Other: '#64748B',
+  };
   return buildPriorityChartData(tasks).map((row) => ({
     ...row,
-    color: PRIORITY_COLORS[row.name]?.color || PRIORITY_COLORS.Medium.color,
+    color: DONUT_COLORS[row.name] || DONUT_COLORS.Other,
   }));
 }
 
@@ -137,42 +143,7 @@ export function buildStatusDonutData(tasks) {
   return buildStatusChartData(tasks);
 }
 
-export function exportTasksCsv(tasks, projectName = 'project') {
-  const list = (tasks || []).filter(isWorkTask);
-  const headers = [
-    'Task ID',
-    'Name',
-    'Status',
-    'Priority',
-    'Assignee',
-    'Start Date',
-    'Due Date',
-    'Progress',
-    'Module',
-    'Phase',
-  ];
-  const rows = list.map((t) => [
-    t.taskId || t.id,
-    t.taskName || '',
-    t.status || '',
-    normalizePriority(t.priority) || t.priority || '',
-    t.developer?.name || '',
-    t.startDate || '',
-    t.dueDate || '',
-    t.progressPercent ?? '',
-    t.module || '',
-    t.phase || '',
-  ]);
-  const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const csv = [headers, ...rows].map((r) => r.map(escape).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${projectName.replace(/\s+/g, '_')}_tasks.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+export { exportTasksCsv } from '../../utils/projectExport';
 
 export function computeHealthScore(completionPercent, scheduleBuckets, deliveryStatus) {
   const completion = Number(completionPercent) || 0;
@@ -200,4 +171,4 @@ export function deliveryStatusMessage(status) {
   }
 }
 
-export { isOverdue, getOverdueDays, isWorkTask };
+export { isOverdue, getOverdueDays, isWorkTask, shouldShowOverdueAlert };

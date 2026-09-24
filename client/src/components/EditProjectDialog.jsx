@@ -9,8 +9,6 @@ import {
   Stack,
   Alert,
   CircularProgress,
-  Box,
-  Typography,
 } from '@mui/material';
 import { Edit as EditIcon } from '@mui/icons-material';
 import api from '../services/api';

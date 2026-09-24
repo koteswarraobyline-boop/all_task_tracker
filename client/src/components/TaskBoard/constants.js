@@ -62,20 +62,20 @@ export function getStatusStyle(statusVal, isDark = false) {
       ? { bgcolor: '#064e3b', color: '#6EE7B7', border: '1px solid #065f46', text: 'Completed' }
       : { bgcolor: '#ECFDF5', color: '#059669', border: '1px solid #A7F3D0', text: 'Completed' },
     'In Development': isDark
-      ? { bgcolor: '#1e3a8a', color: '#93C5FD', border: '1px solid #1e40af', text: 'In Development' }
-      : { bgcolor: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE', text: 'In Development' },
+      ? { bgcolor: '#1e1b4b', color: '#A5B4FC', border: '1px solid #3730A3', text: 'In Development' }
+      : { bgcolor: '#EEF2FF', color: '#4338CA', border: '1px solid #C7D2FE', text: 'In Development' },
     Testing: isDark
-      ? { bgcolor: '#581c87', color: '#D8B4FE', border: '1px solid #6b21a8', text: 'Testing' }
-      : { bgcolor: '#FAF5FF', color: '#9333EA', border: '1px solid #E9D5FF', text: 'Testing' },
+      ? { bgcolor: '#3b0764', color: '#D8B4FE', border: '1px solid #6b21a8', text: 'Testing' }
+      : { bgcolor: '#F5F3FF', color: '#6D28D9', border: '1px solid #DDD6FE', text: 'Testing' },
     Blocked: isDark
       ? { bgcolor: '#450a0a', color: '#FCA5A5', border: '1px solid #7f1d1d', text: 'Blocked' }
-      : { bgcolor: '#FEF2F2', color: '#DC2626', border: '1px solid #FCA5A5', text: 'Blocked' },
+      : { bgcolor: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', text: 'Blocked' },
     'On Hold': isDark
-      ? { bgcolor: '#7c2d12', color: '#FDBA74', border: '1px solid #9a3412', text: 'On Hold' }
-      : { bgcolor: '#FFF7ED', color: '#EA580C', border: '1px solid #FFEDD5', text: 'On Hold' },
+      ? { bgcolor: '#451a03', color: '#FCD34D', border: '1px solid #92400e', text: 'On Hold' }
+      : { bgcolor: '#FFFBEB', color: '#D97706', border: '1px solid #FDE68A', text: 'On Hold' },
     Assigned: isDark
-      ? { bgcolor: '#1e3a8a', color: '#93C5FD', border: '1px solid #1e40af', text: 'Assigned' }
-      : { bgcolor: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE', text: 'Assigned' },
+      ? { bgcolor: '#1e1b4b', color: '#A5B4FC', border: '1px solid #3730A3', text: 'Assigned' }
+      : { bgcolor: '#EEF2FF', color: '#4F46E5', border: '1px solid #C7D2FE', text: 'Assigned' },
     Upcoming: isDark
       ? { bgcolor: '#1f2937', color: '#94A3B8', border: '1px solid #334155', text: 'Planned' }
       : { bgcolor: '#F8FAFC', color: '#64748B', border: '1px solid #E2E8F0', text: 'Planned' },

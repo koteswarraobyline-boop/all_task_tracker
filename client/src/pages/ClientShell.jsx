@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import {
   Box,
@@ -15,12 +15,14 @@ import {
 import api from '../services/api';
 import { useRole } from '../context/RoleContext';
 import Layout from '../components/Layout';
-import ClientOverview from './ClientOverview';
-import ProjectTaskBoard from './ProjectTaskBoard';
-import ProjectTaskCalendar from './ProjectTaskCalendar';
+import PageLoader from '../components/PageLoader';
 import LinkExpiredPage from './LinkExpiredPage';
 import LinkDisabledPage from './LinkDisabledPage';
 import LinkNotFoundPage from './LinkNotFoundPage';
+
+const ClientOverview = React.lazy(() => import('./ClientOverview'));
+const ProjectTaskBoard = React.lazy(() => import('./ProjectTaskBoard'));
+const ProjectTaskCalendar = React.lazy(() => import('./ProjectTaskCalendar'));
 
 export default function ClientShell({ mode, toggleMode }) {
   const { token } = useParams();
@@ -144,13 +146,15 @@ export default function ClientShell({ mode, toggleMode }) {
 
   return (
     <Layout mode={mode} toggleMode={toggleMode}>
-      <Routes>
-        <Route index element={<Navigate to="overview" replace />} />
-        <Route path="overview" element={<ClientOverview />} />
-        <Route path="tasks" element={<ProjectTaskBoard />} />
-        <Route path="calendar" element={<ProjectTaskCalendar />} />
-        <Route path="*" element={<Navigate to="overview" replace />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route index element={<Navigate to="overview" replace />} />
+          <Route path="overview" element={<ClientOverview />} />
+          <Route path="tasks" element={<ProjectTaskBoard />} />
+          <Route path="calendar" element={<ProjectTaskCalendar />} />
+          <Route path="*" element={<Navigate to="overview" replace />} />
+        </Routes>
+      </Suspense>
     </Layout>
   );
 }

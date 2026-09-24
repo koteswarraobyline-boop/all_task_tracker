@@ -1,7 +1,6 @@
 import React from 'react';
 import { Box, Typography, Button, Paper } from '@mui/material';
-import { CloudUpload as UploadIcon } from '@mui/icons-material';
-import { motion } from 'framer-motion';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import Can from './Can';
 import { tokens } from '../theme';
 
@@ -16,12 +15,8 @@ export default function EmptyState({
   return (
     <Paper
       variant="outlined"
-      component={motion.div}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
       sx={{
-        p: { xs: 4, md: 5 },
+        p: { xs: 3, md: 4 },
         textAlign: 'center',
         borderStyle: 'dashed',
         borderWidth: 1.5,
@@ -37,14 +32,15 @@ export default function EmptyState({
         mx: 'auto',
         width: '100%',
         boxSizing: 'border-box',
+        animation: 'none',
         '&:hover': { transform: 'none', boxShadow: 'none' },
       }}
     >
       <Box
         sx={{
-          width: { xs: 120, sm: 160 },
-          height: { xs: 90, sm: 120 },
-          mb: 3,
+          width: { xs: 72, sm: 88 },
+          height: { xs: 56, sm: 68 },
+          mb: 2,
           opacity: 0.9,
           color: 'primary.main',
         }}
@@ -78,12 +74,13 @@ export default function EmptyState({
       <Typography
         variant="body2"
         sx={{
-          color: "text.secondary",
+          color: 'text.secondary',
           maxWidth: 400,
-          mb: onActionClick ? 4 : 0,
+          mb: onActionClick ? 2.5 : 0,
           lineHeight: 1.5,
-          px: 1
-        }}>
+          px: 1,
+        }}
+      >
         {description || 'Nothing to show here yet.'}
       </Typography>
       {onActionClick && actionText && (
@@ -91,7 +88,7 @@ export default function EmptyState({
           <Button
             variant="contained"
             color="primary"
-            startIcon={actionIcon || <UploadIcon />}
+            startIcon={actionIcon || <CloudUploadIcon />}
             onClick={onActionClick}
           >
             {actionText}

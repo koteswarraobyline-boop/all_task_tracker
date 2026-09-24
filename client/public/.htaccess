@@ -1,8 +1,12 @@
 # Document root should be client/dist (or the folder you upload from dist).
 # Proxies /api to the Node/PM2 process. PORT must match server/.env (default 5004).
 #
-# Requires: mod_rewrite + mod_proxy (+ mod_proxy_http) on Apache/LiteSpeed
+# Requires: mod_rewrite + proxy support on Apache/LiteSpeed
 # Prefer forcing HTTPS in cPanel (Domains → Force HTTPS) after SSL is issued.
+
+# Stop CloudLinux Passenger from intercepting /api (that yields LiteSpeed 503
+# "temporarily busy" when the cPanel Node app is not the process serving traffic).
+PassengerEnabled Off
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
@@ -12,7 +16,7 @@
   RewriteRule ^\.well-known/ - [L]
 
   # Proxy API + health checks to Node (PM2 on 127.0.0.1:5004)
-  RewriteRule ^api/(.*)$ http://127.0.0.1:5004/api/$1 [P,L]
+  RewriteRule ^api(/.*)?$ http://127.0.0.1:5004/api$1 [P,L]
 
   # SPA: non-file routes → index.html (React Router /client/:token, etc.)
   RewriteCond %{REQUEST_FILENAME} !-f

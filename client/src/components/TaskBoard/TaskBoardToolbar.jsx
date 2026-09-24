@@ -2,14 +2,15 @@ import React from 'react';
 import {
   Box,
   Button,
-  Chip,
   IconButton,
   InputAdornment,
+  Link,
   Paper,
   Stack,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
@@ -20,21 +21,130 @@ import {
   CalendarTodayOutlined as CalendarIcon,
   ViewList as TableViewIcon,
   ViewKanban as KanbanViewIcon,
-  FilterList as FilterIcon,
   LayersOutlined as PhaseIcon,
   ViewModuleOutlined as ModuleIcon,
   PersonOutlined as DevIcon,
-  FlagOutlined as PriorityIcon,
   DonutLargeOutlined as StatusIcon,
   EventBusyOutlined as OverdueIcon,
+  ChevronRight as ChevronIcon,
 } from '@mui/icons-material';
+import { Link as RouterLink } from 'react-router-dom';
 import FilterDropdown from './FilterDropdown';
 import Can from '../Can';
-import { ALL_STATUSES, STATUS_LABELS, getStatusStyle } from './constants';
+import { ProjectHealthBadge } from '../DeliveryHealth';
+import { ALL_STATUSES, STATUS_LABELS } from './constants';
 
 const FILTER_CONTROL_HEIGHT = 36;
 
+function ScrollStrip({ children }) {
+  return (
+    <Box
+      sx={{
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        minWidth: 0,
+        maxWidth: '100%',
+        WebkitOverflowScrolling: 'touch',
+        '&::-webkit-scrollbar': { height: 5 },
+        '&::-webkit-scrollbar-thumb': { bgcolor: '#CBD5E1', borderRadius: 8 },
+      }}
+    >
+      <Box sx={{ display: 'inline-flex', flexWrap: 'nowrap', gap: 0.75, minWidth: 'min-content', pb: 0.25 }}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+function HeaderIconButton({ title, onClick, children, primary = false }) {
+  return (
+    <Tooltip title={title}>
+      <IconButton
+        onClick={onClick}
+        size="small"
+        aria-label={title}
+        sx={{
+          width: 36,
+          height: 36,
+          borderRadius: '10px',
+          border: primary ? 'none' : '1px solid',
+          borderColor: 'divider',
+          bgcolor: primary ? 'primary.main' : 'background.paper',
+          color: primary ? '#fff' : 'text.secondary',
+          '&:hover': {
+            bgcolor: primary ? 'primary.dark' : 'action.hover',
+          },
+        }}
+      >
+        {children}
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+function HeaderActions({ boardLayout, onBoardLayoutChange, isClient, onCalendar, onImportCsv, onAddTask }) {
+  return (
+    <Stack
+      direction="row"
+      alignItems="center"
+      spacing={0.5}
+      sx={{
+        flexShrink: 0,
+        p: 0.5,
+        borderRadius: '12px',
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+      }}
+    >
+      <ViewToggle boardLayout={boardLayout} onBoardLayoutChange={onBoardLayoutChange} />
+      {!isClient && (
+        <>
+          <HeaderIconButton title="Calendar" onClick={onCalendar}>
+            <CalendarIcon sx={{ fontSize: 18 }} />
+          </HeaderIconButton>
+          <Can permission="task.edit">
+            <HeaderIconButton title="Import CSV" onClick={onImportCsv}>
+              <UploadIcon sx={{ fontSize: 18 }} />
+            </HeaderIconButton>
+            <HeaderIconButton title="Add Task" onClick={onAddTask} primary>
+              <AddIcon sx={{ fontSize: 18 }} />
+            </HeaderIconButton>
+          </Can>
+        </>
+      )}
+    </Stack>
+  );
+}
+function ViewToggle({ boardLayout, onBoardLayoutChange }) {
+  return (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      value={boardLayout}
+      onChange={(_e, v) => v && onBoardLayoutChange(v)}
+      sx={toggleSx}
+      aria-label="View mode"
+    >
+      <Tooltip title="Table">
+        <ToggleButton value="table" aria-label="Table view">
+          <TableViewIcon sx={{ fontSize: 18 }} />
+        </ToggleButton>
+      </Tooltip>
+      <Tooltip title="Kanban">
+        <ToggleButton value="kanban" aria-label="Kanban view">
+          <KanbanViewIcon sx={{ fontSize: 18 }} />
+        </ToggleButton>
+      </Tooltip>
+    </ToggleButtonGroup>
+  );
+}
+
 export default function TaskBoardToolbar({
+  projectName,
+  projectDeliveryStatus,
+  breadcrumbProjectId,
+  summarySlot,
   boardLayout,
   onBoardLayoutChange,
   searchQuery,
@@ -48,107 +158,67 @@ export default function TaskBoardToolbar({
   onImportCsv,
   onAddTask,
   isClient,
-  statusCounts,
-  onStatusChipClick,
-  activeStatusFilters = [],
-  isDark = false,
 }) {
   return (
-    <Stack spacing={2}>
-      {/* Header — matches mockup */}
-      <Stack
-        direction={{ xs: 'column', md: 'row' }}
-        justifyContent="space-between"
-        alignItems={{ xs: 'stretch', md: 'flex-start' }}
-        spacing={1.5}
-      >
-        <Box sx={{ minWidth: 0 }}>
+    <Stack spacing={1} sx={{ minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
+      {!isClient && breadcrumbProjectId && (
+        <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0 }}>
+          <Link component={RouterLink} to="/projects" underline="hover" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary', flexShrink: 0 }}>
+            Projects
+          </Link>
+          <ChevronIcon sx={{ fontSize: 14, color: 'text.secondary', flexShrink: 0 }} />
           <Typography
+            noWrap
+            sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary', minWidth: 0, maxWidth: { xs: 160, sm: 280 } }}
+            title={projectName}
+          >
+            {projectName || 'Project'}
+          </Typography>
+        </Stack>
+      )}
+
+      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.5} sx={{ minWidth: 0, gap: 1 }}>
+        <Stack direction="row" alignItems="center" gap={1} sx={{ minWidth: 0, flex: 1 }}>
+          <Typography
+            component="h1"
+            noWrap
             sx={{
               fontWeight: 800,
-              letterSpacing: '-0.03em',
-              fontSize: { xs: '1.5rem', md: '1.75rem' },
-              lineHeight: 1.15,
-              color: 'text.primary',
+              fontSize: { xs: '1.25rem', md: '1.4rem' },
+              letterSpacing: '-0.02em',
+              minWidth: 0,
             }}
           >
             Task Board
           </Typography>
-          <Typography
-            variant="body2"
-            sx={{ color: 'text.secondary', mt: 0.5, fontWeight: 500 }}
-          >
-            Plan, track and manage all project tasks in one place.
-          </Typography>
-        </Box>
-
-        <Stack
-          direction="row"
-          spacing={1}
-          useFlexGap
-          flexWrap="wrap"
-          justifyContent={{ xs: 'flex-start', md: 'flex-end' }}
-        >
-          {!isClient && (
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<CalendarIcon />}
-              onClick={onCalendar}
-              sx={actionBtnSx}
-            >
-              Calendar
-            </Button>
-          )}
-          {!isClient && (
-            <Can permission="task.edit">
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<UploadIcon />}
-                onClick={onImportCsv}
-                sx={actionBtnSx}
-              >
-                Import CSV
-              </Button>
-              <Button
-                variant="text"
-                size="small"
-                startIcon={<AddIcon />}
-                onClick={onAddTask}
-                sx={{
-                  ...actionBtnSx,
-                  color: 'primary.main',
-                  fontWeight: 700,
-                }}
-              >
-                Add Task
-              </Button>
-            </Can>
-          )}
+          {projectDeliveryStatus && !isClient && <ProjectHealthBadge status={projectDeliveryStatus} />}
         </Stack>
+
+        <HeaderActions
+          boardLayout={boardLayout}
+          onBoardLayoutChange={onBoardLayoutChange}
+          isClient={isClient}
+          onCalendar={onCalendar}
+          onImportCsv={onImportCsv}
+          onAddTask={onAddTask}
+        />
       </Stack>
 
-      {/* Filter toolbar */}
+      {summarySlot}
+
       <Paper
         elevation={0}
         sx={{
-          p: { xs: 1.5, md: 2 },
-          borderRadius: '16px',
+          p: 1.25,
+          borderRadius: '14px',
           border: '1px solid',
           borderColor: 'divider',
-          bgcolor: 'background.paper',
-          boxShadow: '0 4px 12px rgba(15,23,42,0.04)',
+          minWidth: 0,
+          overflow: 'hidden',
         }}
       >
-        <Stack spacing={1.25}>
-          <Stack
-            direction="row"
-            spacing={1}
-            useFlexGap
-            flexWrap="wrap"
-            alignItems="center"
-          >
+        <Stack spacing={1}>
+          <ScrollStrip>
             <FilterDropdown
               label="Phase"
               icon={<PhaseIcon sx={{ fontSize: 16 }} />}
@@ -157,9 +227,7 @@ export default function TaskBoardToolbar({
               onChange={(v) => onFilterChange('phases', v)}
               multiple
               searchable
-              searchPlaceholder="Search phase..."
-              allLabel="Select All"
-              minWidth={112}
+              minWidth={100}
             />
             <FilterDropdown
               label="Module"
@@ -169,24 +237,17 @@ export default function TaskBoardToolbar({
               onChange={(v) => onFilterChange('modules', v)}
               multiple
               searchable
-              searchPlaceholder="Search module..."
-              allLabel="Select All"
-              minWidth={112}
+              minWidth={100}
             />
             <FilterDropdown
               label="Status"
               icon={<StatusIcon sx={{ fontSize: 16 }} />}
-              options={ALL_STATUSES.map((s) => ({
-                value: s,
-                label: STATUS_LABELS[s] || s,
-              }))}
+              options={ALL_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] || s }))}
               value={filters.statuses}
               onChange={(v) => onFilterChange('statuses', v)}
               multiple
               searchable
-              searchPlaceholder="Search status..."
-              allLabel="Select All"
-              minWidth={112}
+              minWidth={100}
             />
             {!isClient && (
               <FilterDropdown
@@ -196,56 +257,33 @@ export default function TaskBoardToolbar({
                 value={filters.developer}
                 onChange={(v) => onFilterChange('developer', v)}
                 searchable
-                searchPlaceholder="Search developer..."
-                minWidth={120}
+                minWidth={108}
               />
             )}
-            <FilterDropdown
-              label="Priority"
-              icon={<PriorityIcon sx={{ fontSize: 16 }} />}
-              options={filterOptions.priorities}
-              value={filters.priority}
-              onChange={(v) => onFilterChange('priority', v)}
-              minWidth={112}
-            />
             <FilterDropdown
               label="Overdue"
               icon={<OverdueIcon sx={{ fontSize: 16 }} />}
               options={[
-                {
-                  value: 'overdue',
-                  label: `Overdue (${filterOptions.overdueCount ?? 0})`,
-                },
+                { value: '', label: 'All Tasks' },
+                { value: 'overdue', label: `Overdue (${filterOptions.overdueCount ?? 0})` },
               ]}
               value={filters.overdueOnly ? 'overdue' : ''}
               onChange={(v) => onFilterChange('overdueOnly', v === 'overdue')}
-              minWidth={112}
+              minWidth={100}
             />
-          </Stack>
+          </ScrollStrip>
 
-          <Stack
-            direction="row"
-            spacing={1}
-            useFlexGap
-            flexWrap="wrap"
-            alignItems="center"
-            justifyContent="space-between"
-          >
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
             <TextField
-              placeholder="Search Tasks"
+              placeholder="Search tasks..."
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               size="small"
+              fullWidth
               sx={{
-                flex: '1 1 220px',
-                minWidth: { xs: '100%', sm: 220 },
-                maxWidth: { xs: '100%', md: 360 },
-                '& .MuiOutlinedInput-root': {
-                  height: FILTER_CONTROL_HEIGHT,
-                  borderRadius: '10px',
-                  fontSize: '0.8125rem',
-                  bgcolor: 'background.paper',
-                },
+                flex: 1,
+                minWidth: 0,
+                '& .MuiOutlinedInput-root': { height: FILTER_CONTROL_HEIGHT, borderRadius: '10px', fontSize: '0.8125rem' },
               }}
               slotProps={{
                 input: {
@@ -256,7 +294,7 @@ export default function TaskBoardToolbar({
                   ),
                   endAdornment: searchQuery ? (
                     <InputAdornment position="end">
-                      <IconButton size="small" onClick={() => onSearchChange('')}>
+                      <IconButton size="small" onClick={() => onSearchChange('')} aria-label="Clear search">
                         <ClearIcon fontSize="small" />
                       </IconButton>
                     </InputAdornment>
@@ -264,220 +302,32 @@ export default function TaskBoardToolbar({
                 },
               }}
             />
-
-            <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-              {activeFilterCount > 0 && (
-                <Button
-                  size="small"
-                  onClick={onClearFilters}
-                  sx={{
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    color: 'text.secondary',
-                    height: FILTER_CONTROL_HEIGHT,
-                    px: 1.25,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  Clear All
-                </Button>
-              )}
-
-              <Chip
-                icon={<FilterIcon sx={{ fontSize: '16px !important' }} />}
-                label={
-                  <Stack direction="row" spacing={0.75} alignItems="center">
-                    <span>Filters</span>
-                    {activeFilterCount > 0 && (
-                      <Box
-                        component="span"
-                        sx={{
-                          minWidth: 18,
-                          height: 18,
-                          px: 0.5,
-                          borderRadius: '999px',
-                          bgcolor: '#2563EB',
-                          color: '#fff',
-                          fontSize: '0.65rem',
-                          fontWeight: 800,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        {activeFilterCount}
-                      </Box>
-                    )}
-                  </Stack>
-                }
-                size="small"
-                sx={{
-                  height: FILTER_CONTROL_HEIGHT,
-                  borderRadius: '10px',
-                  fontWeight: 700,
-                  bgcolor: activeFilterCount ? 'rgba(37,99,235,0.08)' : '#F8FAFC',
-                  color: activeFilterCount ? '#2563EB' : 'text.secondary',
-                  border: '1px solid',
-                  borderColor: activeFilterCount ? 'rgba(37,99,235,0.25)' : 'divider',
-                  '& .MuiChip-icon': {
-                    color: activeFilterCount ? '#2563EB' : 'text.secondary',
-                  },
-                }}
-              />
-            </Stack>
+            {activeFilterCount > 0 && (
+              <Button size="small" onClick={onClearFilters} sx={{ textTransform: 'none', fontWeight: 700, height: FILTER_CONTROL_HEIGHT, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                Clear filters
+              </Button>
+            )}
           </Stack>
         </Stack>
       </Paper>
-
-      {/* View toggle + status chips + group by */}
-      {boardLayout !== 'kanban' ? (
-        <Stack
-          direction={{ xs: 'column', lg: 'row' }}
-          spacing={1.25}
-          alignItems={{ xs: 'stretch', lg: 'center' }}
-          justifyContent="space-between"
-        >
-          <Stack
-            direction="row"
-            spacing={1}
-            alignItems="center"
-            useFlexGap
-            flexWrap="wrap"
-            sx={{ flex: 1, minWidth: 0 }}
-          >
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              value={boardLayout}
-              onChange={(_e, v) => v && onBoardLayoutChange(v)}
-              sx={toggleSx}
-            >
-              <ToggleButton value="table">
-                <TableViewIcon sx={{ fontSize: 16 }} />
-                Table
-              </ToggleButton>
-              <ToggleButton value="kanban">
-                <KanbanViewIcon sx={{ fontSize: 16 }} />
-                Kanban
-              </ToggleButton>
-            </ToggleButtonGroup>
-
-            <Box
-              sx={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 0.75,
-                alignItems: 'center',
-                flex: 1,
-                minWidth: 0,
-              }}
-            >
-              {ALL_STATUSES.map((status) => {
-                const count = statusCounts?.[status] ?? 0;
-                const active = activeStatusFilters.includes(status);
-                const style = getStatusStyle(status, isDark);
-                const label = STATUS_LABELS[status] || status;
-                return (
-                  <Chip
-                    key={status}
-                    label={`${label} (${count})`}
-                    size="small"
-                    onClick={() => onStatusChipClick?.(status)}
-                    sx={{
-                      height: 32,
-                      borderRadius: '999px',
-                      fontWeight: 700,
-                      fontSize: '0.72rem',
-                      cursor: 'pointer',
-                      bgcolor: active ? style.color : style.bgcolor,
-                      color: active ? '#fff' : style.color,
-                      border: style.border,
-                      transition: 'all 0.15s ease',
-                      '&:hover': {
-                        filter: 'brightness(0.97)',
-                        boxShadow: '0 2px 6px rgba(15,23,42,0.08)',
-                      },
-                    }}
-                  />
-                );
-              })}
-            </Box>
-          </Stack>
-
-          <Typography
-            variant="caption"
-            sx={{
-              fontWeight: 700,
-              color: 'text.secondary',
-              whiteSpace: 'nowrap',
-              px: 1.25,
-              height: 32,
-              display: 'inline-flex',
-              alignItems: 'center',
-              borderRadius: '8px',
-              border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: 'background.paper',
-              alignSelf: { xs: 'flex-start', lg: 'center' },
-              flexShrink: 0,
-            }}
-          >
-            Group by: Phase › Module
-          </Typography>
-        </Stack>
-      ) : (
-        <ToggleButtonGroup
-          exclusive
-          size="small"
-          value={boardLayout}
-          onChange={(_e, v) => v && onBoardLayoutChange(v)}
-          sx={toggleSx}
-        >
-          <ToggleButton value="table">
-            <TableViewIcon sx={{ fontSize: 16 }} />
-            Table
-          </ToggleButton>
-          <ToggleButton value="kanban">
-            <KanbanViewIcon sx={{ fontSize: 16 }} />
-            Kanban
-          </ToggleButton>
-        </ToggleButtonGroup>
-      )}
     </Stack>
   );
 }
 
-const actionBtnSx = {
-  height: 36,
-  borderRadius: '10px',
-  textTransform: 'none',
-  fontWeight: 700,
-  fontSize: '0.8125rem',
-  whiteSpace: 'nowrap',
-  px: 1.5,
-};
-
 const toggleSx = {
-  height: 32,
-  flexShrink: 0,
-  bgcolor: '#F1F5F9',
+  height: 36,
+  bgcolor: 'transparent',
   borderRadius: '10px',
-  p: 0.25,
-  border: 'none',
+  p: 0,
+  flexShrink: 0,
+  boxShadow: 'none',
   '& .MuiToggleButton-root': {
     border: 'none',
     borderRadius: '8px !important',
-    px: 1.25,
-    textTransform: 'none',
-    fontWeight: 700,
-    fontSize: '0.78rem',
-    gap: 0.5,
-    color: 'text.secondary',
-    '&.Mui-selected': {
-      bgcolor: '#0F172A',
-      color: '#fff',
-      boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
-      '&:hover': { bgcolor: '#1E293B' },
-    },
+    px: 0.75,
+    py: 0.5,
+    minWidth: 34,
+    lineHeight: 0,
+    '&.Mui-selected': { bgcolor: '#4F46E5', color: '#fff' },
   },
 };

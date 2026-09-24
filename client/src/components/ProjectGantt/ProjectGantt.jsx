@@ -562,21 +562,24 @@ export default function ProjectGantt({
             }}
             aria-label="Timeline scale"
             sx={{
-              bgcolor: dark ? 'rgba(255,255,255,0.06)' : '#F1F5F9',
+              bgcolor: dark ? 'rgba(255,255,255,0.06)' : '#F8FAFC',
               borderRadius: 2,
               p: 0.25,
+              border: dark ? 'none' : '1px solid #E2E8F0',
               '& .MuiToggleButton-root': {
                 border: 'none',
-                borderRadius: '8px !important',
+                borderRadius: '6px !important',
                 px: compact ? 0.85 : 1.35,
                 py: compact ? 0.3 : 0.45,
                 textTransform: 'none',
-                fontWeight: 700,
+                fontWeight: 600,
                 fontSize: compact ? '0.7rem' : '0.78rem',
+                color: dark ? undefined : '#64748B',
                 '&.Mui-selected': {
-                  bgcolor: dark ? '#1e293b' : '#fff',
-                  color: '#2563EB',
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                  bgcolor: '#2563EB',
+                  color: '#FFFFFF',
+                  boxShadow: 'none',
+                  '&:hover': { bgcolor: '#1D4ED8' },
                 },
               },
             }}

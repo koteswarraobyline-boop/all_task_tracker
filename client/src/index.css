@@ -16,7 +16,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
-  background-color: #F8FAFC;
+  background-color: #F4F6F9;
 }
 
 img,
@@ -116,14 +116,16 @@ canvas {
 }
 
 .tt-fullcalendar .fc .fc-toolbar-title {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
+  font-weight: 600;
 }
 
 .tt-fullcalendar .fc .fc-button {
   border-radius: 8px !important;
-  font-weight: 650;
+  font-weight: 600;
   text-transform: capitalize;
-  padding: 0.4rem 0.75rem !important;
+  padding: 0.35rem 0.7rem !important;
+  box-shadow: none !important;
 }
 
 .tt-fullcalendar .fc .fc-daygrid-day-number {

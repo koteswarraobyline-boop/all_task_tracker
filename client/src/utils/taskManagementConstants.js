@@ -33,7 +33,7 @@ export const STATUS_CATALOG = [
     label: 'Not Started',
     apiStatuses: ['Upcoming'],
     writeStatus: 'Upcoming',
-    color: '#94A3B8',
+    color: '#64748B',
     progress: 0,
   },
   {
@@ -41,7 +41,7 @@ export const STATUS_CATALOG = [
     label: 'Pending',
     apiStatuses: ['Assigned'],
     writeStatus: 'Assigned',
-    color: '#EAB308',
+    color: '#2563EB',
     progress: 10,
   },
   {
@@ -58,7 +58,7 @@ export const STATUS_CATALOG = [
     // Aggregate: actively moving through the pipeline (not a duplicate of In Development alone)
     apiStatuses: ['In Development', 'Testing'],
     writeStatus: 'In Development',
-    color: '#F97316',
+    color: '#2563EB',
     progress: 50,
   },
   {
@@ -66,7 +66,7 @@ export const STATUS_CATALOG = [
     label: 'Testing',
     apiStatuses: ['Testing'],
     writeStatus: 'Testing',
-    color: '#9333EA',
+    color: '#2563EB',
     progress: 80,
   },
   {
@@ -74,7 +74,7 @@ export const STATUS_CATALOG = [
     label: 'Blocked',
     apiStatuses: ['Blocked'],
     writeStatus: 'Blocked',
-    color: '#EF4444',
+    color: '#D97706',
     progress: 25,
   },
   {
@@ -82,7 +82,7 @@ export const STATUS_CATALOG = [
     label: 'Completed',
     apiStatuses: ['Completed'],
     writeStatus: 'Completed',
-    color: '#22C55E',
+    color: '#15803D',
     progress: 100,
   },
   {
@@ -90,7 +90,7 @@ export const STATUS_CATALOG = [
     label: 'Cancelled',
     apiStatuses: ['On Hold'],
     writeStatus: 'On Hold',
-    color: '#6B7280',
+    color: '#64748B',
     progress: 0,
   },
 ];
@@ -158,14 +158,26 @@ const API_TO_DISPLAY = {
 };
 
 const API_TO_COLOR = {
-  Upcoming: '#94A3B8',
-  Assigned: '#EAB308',
+  Upcoming: '#64748B',
+  Assigned: '#2563EB',
   'In Development': '#2563EB',
-  Testing: '#9333EA',
-  Completed: '#22C55E',
-  Blocked: '#EF4444',
-  'On Hold': '#6B7280',
-  'Code Review': '#9333EA',
+  Testing: '#2563EB',
+  Completed: '#15803D',
+  Blocked: '#D97706',
+  'On Hold': '#64748B',
+  'Code Review': '#2563EB',
+};
+
+/** Soft badge surfaces matching the design system */
+const STATUS_SOFT = {
+  Upcoming: { color: '#64748B', bgcolor: '#F1F5F9' },
+  Assigned: { color: '#2563EB', bgcolor: '#EFF6FF' },
+  'In Development': { color: '#2563EB', bgcolor: '#EFF6FF' },
+  Testing: { color: '#2563EB', bgcolor: '#EFF6FF' },
+  Completed: { color: '#15803D', bgcolor: '#ECFDF5' },
+  Blocked: { color: '#D97706', bgcolor: '#FFFBEB' },
+  'On Hold': { color: '#64748B', bgcolor: '#F1F5F9' },
+  'Code Review': { color: '#2563EB', bgcolor: '#EFF6FF' },
 };
 
 /** Module-local progress defaults (examples from product spec) */
@@ -189,18 +201,18 @@ export function getStatusColor(apiStatus) {
 }
 
 export function getStatusChipSx(apiStatus, isDark = false) {
-  const color = getStatusColor(apiStatus);
+  const soft = STATUS_SOFT[apiStatus] || { color: '#64748B', bgcolor: '#F1F5F9' };
   if (isDark) {
     return {
-      color,
-      bgcolor: `${color}22`,
-      border: `1px solid ${color}55`,
+      color: soft.color,
+      bgcolor: `${soft.color}22`,
+      border: `1px solid ${soft.color}55`,
     };
   }
   return {
-    color,
-    bgcolor: `${color}18`,
-    border: `1px solid ${color}44`,
+    color: soft.color,
+    bgcolor: soft.bgcolor,
+    border: '1px solid transparent',
   };
 }
 
@@ -275,6 +287,13 @@ export function isOverdue(task, today = startOfDay()) {
   const due = toDateOnly(task.dueDate);
   if (!due) return false;
   return new Date(`${due}T00:00:00`) < today;
+}
+
+/** Show red overdue UI only for active work — not paused/blocked/completed tasks. */
+export function shouldShowOverdueAlert(task, today = startOfDay()) {
+  if (!task || !isOverdue(task, today)) return false;
+  const status = task.status === 'Code Review' ? 'Testing' : task.status;
+  return !['Completed', 'On Hold', 'Blocked'].includes(status);
 }
 
 /** Calendar days past due date (0 if not overdue). Includes On Hold / Blocked when past due. */

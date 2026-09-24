@@ -28,6 +28,7 @@ import {
 } from '@mui/icons-material';
 import api from '../services/api';
 import { openClientInviteEmail } from '../utils/clientInviteMail';
+import { resolveClientShareUrl } from '../utils/shareUrl';
 
 export default function ShareProjectDialog({ open, onClose, project }) {
   const [record, setRecord] = useState(null);
@@ -99,13 +100,14 @@ export default function ShareProjectDialog({ open, onClose, project }) {
   };
 
   const handleCopy = async () => {
-    if (!record?.shareUrl) return;
+    const shareUrl = resolveClientShareUrl(record);
+    if (!shareUrl) return;
     try {
-      await navigator.clipboard.writeText(record.shareUrl);
+      await navigator.clipboard.writeText(shareUrl);
       showMsg('Link copied to clipboard');
     } catch {
       const el = document.createElement('textarea');
-      el.value = record.shareUrl;
+      el.value = shareUrl;
       document.body.appendChild(el);
       el.select();
       document.execCommand('copy');
@@ -120,7 +122,8 @@ export default function ShareProjectDialog({ open, onClose, project }) {
       showMsg('Add a client email address first', 'warning');
       return;
     }
-    if (!record?.shareUrl) {
+    const shareUrl = resolveClientShareUrl(record);
+    if (!shareUrl) {
       showMsg('Generate a secure link first', 'warning');
       return;
     }
@@ -128,7 +131,7 @@ export default function ShareProjectDialog({ open, onClose, project }) {
       to,
       clientName: clientName.trim() || record?.clientName,
       projectName: project?.name,
-      shareUrl: record.shareUrl,
+      shareUrl,
       passwordProtected: Boolean(record.passwordProtected || passwordProtected),
     });
     if (opened) {
@@ -333,7 +336,7 @@ export default function ShareProjectDialog({ open, onClose, project }) {
                   />
                 </Box>
                 <TextField
-                  value={record.shareUrl}
+                  value={resolveClientShareUrl(record)}
                   fullWidth
                   slotProps={{
                     input: {
