@@ -48,7 +48,10 @@ const envOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_APP_URL || ''
   .map((o) => o.trim())
   .filter(Boolean);
 
-const allowedOrigins = [...new Set([...envOrigins, ...defaultDevOrigins])];
+/** Production: only configured origins. Dev: env + localhost defaults. */
+const allowedOrigins = isProd
+  ? [...new Set(envOrigins)]
+  : [...new Set([...envOrigins, ...defaultDevOrigins])];
 
 if (isProd && allowedOrigins.length === 0) {
   console.error('FATAL: Set CORS_ORIGINS or CLIENT_APP_URL in production.');
@@ -69,9 +72,7 @@ app.use(
         callback(null, true);
         return;
       }
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else if (!isProd) {
+      if (!isProd || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(null, false);
@@ -143,16 +144,19 @@ if (fs.existsSync(clientDist)) {
 app.use((err, req, res, next) => {
   console.error('Express Error Handler:', err);
   const status = err.status || 500;
-  const message = isProd && status >= 500
-    ? 'An unexpected error occurred'
-    : err.message || 'An unexpected error occurred';
+  const message =
+    isProd && status >= 500
+      ? 'An unexpected error occurred'
+      : err.message || 'An unexpected error occurred';
   res.status(status).json({ error: message });
 });
 
 function listenHttp() {
   return new Promise((resolve, reject) => {
     const server = app.listen(PORT, HOST, () => {
-      console.log(`Server is running on http://${HOST}:${PORT} (${isProd ? 'production' : 'development'})`);
+      console.log(
+        `Server is running on http://${HOST}:${PORT} (${isProd ? 'production' : 'development'})`
+      );
       if (typeof process.send === 'function') {
         process.send('ready');
       }
@@ -162,6 +166,42 @@ function listenHttp() {
   });
 }
 
+async function initDatabase() {
+  if (isProd && process.env.DB_SYNC_ALTER === 'true') {
+    console.warn(
+      'WARNING: DB_SYNC_ALTER=true in production can alter live tables. Prefer migrations.'
+    );
+  }
+
+  console.log(
+    `Connecting to MySQL as ${dbConfig.user}@${dbConfig.host}:${dbConfig.port}/${dbConfig.name}`
+  );
+
+  await ensureDatabaseExists();
+  await sequelize.authenticate();
+  console.log('Database connection has been established successfully.');
+
+  const syncOptions = !isProd && process.env.DB_SYNC_ALTER === 'true' ? { alter: true } : {};
+  await sequelize.sync(syncOptions);
+  console.log('Database models synchronized successfully.');
+
+  await ensureTaskSchema();
+  console.log('Task schema columns verified.');
+
+  await ensureDeveloperSchema();
+  console.log('Developer schema columns verified.');
+
+  await ensureWbsSchema();
+  console.log('WBS schema columns verified.');
+
+  await seedDefaultAdmin();
+}
+
+/**
+ * Listen first, then connect DB (with retries).
+ * Why: if process exits on DB failure, LiteSpeed returns HTML 503 and login breaks.
+ * Keeping HTTP up lets /api/health report JSON and PM2/host keep the process alive.
+ */
 async function startServer() {
   let server;
   try {
@@ -187,37 +227,34 @@ async function startServer() {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  try {
-    if (isProd && process.env.DB_SYNC_ALTER === 'true') {
-      console.warn('WARNING: DB_SYNC_ALTER=true in production can alter live tables. Prefer migrations.');
+  const maxAttempts = Number(process.env.DB_CONNECT_RETRIES) || (isProd ? 10 : 3);
+  const delayMs = Number(process.env.DB_CONNECT_RETRY_MS) || 3000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await initDatabase();
+      return;
+    } catch (error) {
+      console.error(`Database init failed (attempt ${attempt}/${maxAttempts}):`, error.message || error);
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
     }
-
-    console.log(
-      `Connecting to MySQL as ${dbConfig.user}@${dbConfig.host}:${dbConfig.port}/${dbConfig.name}`
-    );
-
-    await ensureDatabaseExists();
-    await sequelize.authenticate();
-    console.log('Database connection has been established successfully.');
-
-    const syncOptions = !isProd && process.env.DB_SYNC_ALTER === 'true' ? { alter: true } : {};
-    await sequelize.sync(syncOptions);
-    console.log('Database models synchronized successfully.');
-
-    await ensureTaskSchema();
-    console.log('Task schema columns verified.');
-
-    await ensureDeveloperSchema();
-    console.log('Developer schema columns verified.');
-
-    await ensureWbsSchema();
-    console.log('WBS schema columns verified.');
-
-    await seedDefaultAdmin();
-  } catch (error) {
-    console.error('Unable to connect to the database:', error);
-    console.error('HTTP is listening so the reverse proxy can reach this process. /api/health will report database unavailable until MySQL is fixed.');
   }
+
+  console.error(
+    'Database still unavailable after retries. HTTP stays up; /api/health will return 503 until MySQL works.'
+  );
 }
+
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException:', err);
+  if (isProd) process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection:', reason);
+  if (isProd) process.exit(1);
+});
 
 startServer();

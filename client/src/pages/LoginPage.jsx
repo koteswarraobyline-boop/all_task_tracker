@@ -351,9 +351,13 @@ export default function LoginPage() {
       const status = err.response?.status;
       const apiError = err.response?.data?.error;
       if (!err.response) {
-        setError('Cannot reach server. Is the API running?');
+        setError('Cannot reach server. Is the API running on this machine? Start server with npm run dev.');
       } else if (status === 502 || status === 503 || status === 504) {
-        setError('API unavailable (server error). Try again later.');
+        setError(
+          'Backend is down (HTTP ' +
+            status +
+            '). On production, restart the Node app in your host panel. For local use http://localhost:5173.'
+        );
       } else if (status === 401) {
         setError(typeof apiError === 'string' ? apiError : 'Invalid email/username or password.');
       } else if (typeof apiError === 'string' && apiError.trim()) {
